@@ -6,21 +6,36 @@ close all;
 rng(4);  % random number generator
 
 % Choose scenario
-scenarioId = 1;  % set 1 or 2
+scenarioId = 2;  % set 1 or 2
 [W, obs, q_start, q_goal] = getScenario(scenarioId);
 
 %% ------------------ SNG PARAMETERS -------------------------
 
-P.maxNodes = 200; %100;                             % number of nodes to attempt/accept 
-P.maxTriesPerNode = 200; %10;                       % attempts before giving up sampling 
-P.overlapThreshold = 1e-4;                          % overlap area threshold for edge creation 
-P.minRectArea = 0.01;                               % reject tiny nodes 
-P.seedRectHalfSize = [0.15 0.15]; %[0.01 0.01];     % initial half-widths [hx hy] 
-P.maxExpandSteps = 30; %18;                         % rectangle expansion iterations 
-P.expandGrowth = 1.20;                              % multiply half-sizes by this if safe 
-P.maxHalfSize = [6 6];                              % cap rectangle half-sizes 
-P.safetyMargin = 0.05;                              % Safety margin so rectangles don't graze obstacles too tightly
+P.maxNodes = 100;             % number of nodes to attempt/accept 
+P.maxTriesPerNode = 10; % attempts before giving up sampling 
+P.overlapThreshold = 1e-3; % overlap area threshold for edge creation 
+P.minRectArea = 0.01; % reject tiny nodes 
+P.seedRectHalfSize = [0.01 0.01]; % initial half-widths [hx hy] 
+P.maxExpandSteps = 18; % rectangle expansion iterations 
+P.expandGrowth = 1.25; % multiply half-sizes by this if safe 
+P.maxHalfSize = [6 6]; % cap rectangle half-sizes 
+P.safetyMargin = 0.05; % Safety margin so rectangles don't graze obstacles too tightly
+
+P.maxNodes        = 350;     % you need many nodes like the picture
+P.maxTriesPerNode = 200;     % otherwise you stop early in narrow passages
+
+P.overlapThreshold = 1e-4;   % allow small overlaps to still connect
+
+P.seedRectHalfSize = [0.15 0.15];  % initial rectangle size ~ 0.3m x 0.3m
+P.maxExpandSteps   = 30;           % allow more growth iterations
+P.expandGrowth     = 1.20;         % smaller growth factor -> smoother expansion
+P.maxHalfSize      = [6 6];        % keep
+
+P.minRectArea     = 0.20;   % reject tiny useless regions (not too aggressive)
+P.safetyMargin    = 0.03;   % slightly smaller so rectangles can fill corridors
+
 P.expandStep = 0.05;   % meters
+
 
 %% ------------------ BUILD SNG GRAPH ------------------------
 % Node struct:
@@ -182,30 +197,32 @@ function poly = buildRectNode(q, obs, workPoly, P)
         theta = atan2(dirVec(2), dirVec(1)) + pi/2;
     end
 
-    % Start from seed
-    hx = P.seedRectHalfSize(1);
-    hy = P.seedRectHalfSize(2);
-    poly = rectPoly(q, hx, hy, theta);
 
-    % Expand X+ and X- symmetrically (increase hx) until collision
-    while hx + P.expandStep <= P.maxHalfSize(1)
-        cand = rectPoly(q, hx + P.expandStep, hy, theta);
-        if ~isPolyInsideWorkspace(cand, workPoly) || rectCollides(cand, obs, P.safetyMargin)
-            break;
-        end
-        hx = hx + P.expandStep;
-        poly = cand;
+    % Start from seed
+hx = P.seedRectHalfSize(1);
+hy = P.seedRectHalfSize(2);
+poly = rectPoly(q, hx, hy, theta);
+
+% Expand X+ and X- symmetrically (increase hx) until collision
+while hx + P.expandStep <= P.maxHalfSize(1)
+    cand = rectPoly(q, hx + P.expandStep, hy, theta);
+    if ~isPolyInsideWorkspace(cand, workPoly) || rectCollides(cand, obs, P.safetyMargin)
+        break;
     end
-    
-    % Expand Y+ and Y- symmetrically (increase hy) until collision
-    while hy + P.expandStep <= P.maxHalfSize(2)
-        cand = rectPoly(q, hx, hy + P.expandStep, theta);
-        if ~isPolyInsideWorkspace(cand, workPoly) || rectCollides(cand, obs, P.safetyMargin)
-            break;
-        end
-        hy = hy + P.expandStep;
-        poly = cand;
+    hx = hx + P.expandStep;
+    poly = cand;
+end
+
+% Expand Y+ and Y- symmetrically (increase hy) until collision
+while hy + P.expandStep <= P.maxHalfSize(2)
+    cand = rectPoly(q, hx, hy + P.expandStep, theta);
+    if ~isPolyInsideWorkspace(cand, workPoly) || rectCollides(cand, obs, P.safetyMargin)
+        break;
     end
+    hy = hy + P.expandStep;
+    poly = cand;
+end
+
 
     % Initial candidate (NO intersect/clip)
     poly0 = rectPoly(q, hx, hy, theta);
