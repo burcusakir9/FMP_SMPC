@@ -40,7 +40,6 @@ P.safetyMargin        = 0.05;   % Safety margin so rectangles don't graze obstac
 
 nodes = struct('poly', {}, 'c', {}, 'id', {});
 A = sparse(0,0); % adjacency (weighted)
-accepted = 0;
 
 % Workspace polygon
 workPoly = polyshape([W(1) W(2) W(2) W(1)],[W(3) W(3) W(4) W(4)]);
@@ -62,22 +61,33 @@ while accepted < P.maxNodes
         nodePoly = buildRectNode(q, obs, workPoly, P);
         if isempty(nodePoly), continue; end
 
+        % Check is minimum area threshold holds
         if area(nodePoly) < P.minRectArea
             continue;
         end
 
         % ---- accept node ----
+
+        % iterate
         accepted = accepted + 1;
+
+        % Add accepted node to the list
         nodes(accepted).poly = nodePoly;
+
+        % Obtain node center
         [cx, cy] = centroid(nodePoly);
+
+        % Record node centroid info
         nodes(accepted).c = [cx, cy];
+
+        % Record node id
         nodes(accepted).id = accepted;
 
         success = true;
         break;
     end
 
-    % If we couldn't create a new node in maxTriesPerNode attempts, stop
+    % If couldn't create a new node in maxTriesPerNode attempts, stop
     if ~success
         break;
     end
@@ -85,7 +95,7 @@ end
 
 fprintf('Accepted nodes: %d\n', accepted);
 
-% Add start and goal as nodes (small rectangles) and connect by overlap
+% Add start and goal as nodes and connect by overlap
 nodes = addPointAsNode(nodes, q_start, obs, workPoly, P, "START");
 nodes = addPointAsNode(nodes, q_goal,  obs, workPoly, P, "GOAL");
 
@@ -100,12 +110,14 @@ if isempty(startId) || isempty(goalId)
 end
 
 %% ------------------ SHORTEST NODE-PATH ---------------------
-[pathIds, distVal] = dijkstraSparse(A, startId, goalId);
+
+% Find the shortest path
+[pathIds, distVal] = dijkstraSparse(A, startId, goalId);  % TODO start goal points are not in the path
 
 if isempty(pathIds)
     warning('No path found in the graph (graph may be disconnected).');
 else
-    fprintf('Found node-path with %d nodes, total centroid-distance = %.3f\n', numel(pathIds), distVal);
+    fprintf('Found path with %d nodes, total centroid-distance = %.3f\n', numel(pathIds), distVal);
 end
 
 %% ------------------ PLOTTING -------------------------------
@@ -291,9 +303,9 @@ function [dirVec, dmin] = nearestObstacleDirection(q, obs)
 end
 
 function nodes = addPointAsNode(nodes, q, obs, workPoly, P, tag)
-    % Add a small rectangle node at q so start/goal can attach by overlap.
+    % Add a node at q so start/goal can attach by overlap.
     P2 = P;
-    P2.seedRectHalfSize = [0.8 0.8];
+    P2.seedRectHalfSize = [0.8 0.8];  % TODO this shoud not be fixed size
     P2.maxExpandSteps   = 6;
     poly = buildRectNode(q, obs, workPoly, P2);
 
@@ -314,18 +326,25 @@ function nodes = addPointAsNode(nodes, q, obs, workPoly, P, tag)
 end
 
 function A = rebuildAdjacency(nodes, P)
-    n = numel(nodes);
-    A = sparse(n,n);
+    n = numel(nodes); % # of nodes
+    A = sparse(n,n);  % Square matrix by the size of # of nodes
 
+    % Iterate over all node pairs
     for i=1:n
         for j=i+1:n
-            ci = nodes(i).c; cj = nodes(j).c;
 
-            % 1) overlap edge
+            % Centroid of the node pairs
+            ci = nodes(i).c; 
+            cj = nodes(j).c;
+    
+            % Overlap polygon of node pairs
             ov = intersect(nodes(i).poly, nodes(j).poly);
+
+            % If pair of nodes overlap, calculate the weight for overlap and record to A
             if ~isempty(ov) && area(ov) > P.overlapThreshold
                 w = norm(ci - cj);
-                A(i,j)=w; A(j,i)=w;
+                A(i,j)=w; 
+                A(j,i)=w;
                 continue;
             end
         end
