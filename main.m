@@ -5,28 +5,17 @@ clc;
 close all;
 rng(4);  % random number generator
 
-%% ------------------ MAP DEFINITION -------------------------
-% Workspace bounds 
-W = [0 30 0 20];  % [xmin xmax ymin ymax]
+% Choose scenario
+scenarioId = 1;  % set 1 or 2
+[W, obs, q_start, q_goal] = getScenario(scenarioId);
 
-% Obstacles as polynoms
-obs = {};
-% obs{end+1} = polyshape([6 10 10 6],[3 3 7 7]); % [x1 x2 x3 x4],[y1 y2 y3 y4]
-% obs{end+1} = polyshape([14 18 18 14],[2 2 6 6]);
-% obs{end+1} = polyshape([20 24 24 20],[10 10 16 16]);
-% obs{end+1} = polyshape([8 12 12 8],[12 12 18 18]);
-% obs{end+1} = polyshape([2 4 4 2],[9 9 14 14]);
-
-% Start / Goal points [x, y]
-q_start = [2 2]; 
-q_goal  = [28 18];
 
 %% ------------------ SNG PARAMETERS -------------------------
-P.maxNodes            = 50;    % number of nodes to attempt/accept
+P.maxNodes            = 100;    % number of nodes to attempt/accept
 P.maxTriesPerNode     = 10;     % attempts before giving up sampling
 P.overlapThreshold    = 1e-3;   % overlap area threshold for edge creation
-P.minRectArea         = 0.40;   % reject tiny nodes
-P.seedRectHalfSize    = [0.6 0.6]; % initial half-widths [hx hy]
+P.minRectArea         = 0.01;   % reject tiny nodes
+P.seedRectHalfSize    = [0.01 0.01]; % initial half-widths [hx hy]
 P.maxExpandSteps      = 18;     % rectangle expansion iterations
 P.expandGrowth        = 1.25;   % multiply half-sizes by this if safe
 P.maxHalfSize         = [6 6];  % cap rectangle half-sizes
