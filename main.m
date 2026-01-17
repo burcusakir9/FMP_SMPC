@@ -11,18 +11,18 @@ W = [0 30 0 20];  % [xmin xmax ymin ymax]
 
 % Obstacles as polynoms
 obs = {};
-obs{end+1} = polyshape([6 10 10 6],[3 3 7 7]); % [x1 x2 x3 x4],[y1 y2 y3 y4]
-obs{end+1} = polyshape([14 18 18 14],[2 2 6 6]);
-obs{end+1} = polyshape([20 24 24 20],[10 10 16 16]);
-obs{end+1} = polyshape([8 12 12 8],[12 12 18 18]);
-obs{end+1} = polyshape([2 4 4 2],[9 9 14 14]);
+% obs{end+1} = polyshape([6 10 10 6],[3 3 7 7]); % [x1 x2 x3 x4],[y1 y2 y3 y4]
+% obs{end+1} = polyshape([14 18 18 14],[2 2 6 6]);
+% obs{end+1} = polyshape([20 24 24 20],[10 10 16 16]);
+% obs{end+1} = polyshape([8 12 12 8],[12 12 18 18]);
+% obs{end+1} = polyshape([2 4 4 2],[9 9 14 14]);
 
 % Start / Goal points [x, y]
 q_start = [2 2]; 
 q_goal  = [28 18];
 
 %% ------------------ SNG PARAMETERS -------------------------
-P.maxNodes            = 100;    % number of nodes to attempt/accept
+P.maxNodes            = 50;    % number of nodes to attempt/accept
 P.maxTriesPerNode     = 10;     % attempts before giving up sampling
 P.overlapThreshold    = 1e-3;   % overlap area threshold for edge creation
 P.minRectArea         = 0.40;   % reject tiny nodes
@@ -97,13 +97,13 @@ fprintf('Accepted nodes: %d\n', accepted);
 
 % Add start and goal as nodes and connect by overlap
 nodes = addPointAsNode(nodes, q_start, obs, workPoly, P, "START");
+startId = numel(nodes);  % Goal node index
+
 nodes = addPointAsNode(nodes, q_goal,  obs, workPoly, P, "GOAL");
+goalId  = numel(nodes);  % Goal node index
 
 % Rebuild adjacency including the new nodes
 A = rebuildAdjacency(nodes, P);
-
-startId = findNodeContainingPoint(nodes, q_start);
-goalId  = findNodeContainingPoint(nodes, q_goal);
 
 if isempty(startId) || isempty(goalId)
     error('Start/Goal could not be embedded into the graph. Try increasing maxNodes or changing parameters.');
@@ -112,7 +112,7 @@ end
 %% ------------------ SHORTEST NODE-PATH ---------------------
 
 % Find the shortest path
-[pathIds, distVal] = dijkstraSparse(A, startId, goalId);  % TODO start goal points are not in the path
+[pathIds, distVal] = dijkstraSparse(A, startId, goalId);  
 
 if isempty(pathIds)
     warning('No path found in the graph (graph may be disconnected).');
@@ -347,17 +347,6 @@ function A = rebuildAdjacency(nodes, P)
                 A(j,i)=w;
                 continue;
             end
-        end
-    end
-end
-
-
-function id = findNodeContainingPoint(nodes, q)
-    id = [];
-    for i=1:numel(nodes)
-        if isinterior(nodes(i).poly, q(1), q(2))
-            id = i;
-            return;
         end
     end
 end
