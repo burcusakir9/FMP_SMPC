@@ -1,15 +1,14 @@
-%%  SNG (Sampling-Based Neighborhood Graph) - Method 1/2 + optional asymmetric growth
+%%  SNG (Sampling-Based Neighborhood Graph)
 
 clear; clc; close all;
 rng(5);
 
 % Choose scenario
-scenarioId = 2;                % set 1 or 2
+scenarioId = 1;                % set 1 or 2
 [W, obs, q_start, q_goal] = getScenario(scenarioId);
 
 %% ------------------ SNG PARAMETERS -------------------------
-P.method = 2;                  % 1 or 2
-P.asymExpand = true;           % true = asymmetric growth, false = symmetric growth
+P.asymExpand = false;           % true = asymmetric growth, false = symmetric growth
 
 P.maxNodes        = 100;
 P.maxTriesPerNode = 200;
@@ -39,14 +38,10 @@ while accepted < P.maxNodes
         q = sampleFreePoint(W, obs, workPoly);
         if isempty(q), continue; end
 
-        if P.method == 1
-            theta = 0; %#ok<NASGU>
-            nodePoly = buildRectNode(q, obs, workPoly, P);   % expanded node
-            theta = 0;  % stored but not needed for method 1
-        else
-            [nodePoly, theta] = buildInitialSquare(q, obs, workPoly, P); % unexpanded square
-        end
-
+        theta = 0; %#ok<NASGU>
+        nodePoly = buildRectNode(q, obs, workPoly, P);   % expanded node
+        theta = 0;  % stored but not needed for method 1
+        
         if isempty(nodePoly), continue; end
         if area(nodePoly) < P.minRectArea, continue; end
 
@@ -79,15 +74,6 @@ A = rebuildAdjacency(nodes, P);
 
 %% ------------------ SHORTEST NODE-PATH ---------------------
 [pathIds, distVal] = dijkstraSparse(A, startId, goalId);
-
-% Method 2: expand AFTER initial graph
-if P.method == 2
-    for i = 1:numel(nodes)
-        nodes(i).poly = expandNode(nodes(i).poly, nodes(i).c, nodes(i).theta, obs, workPoly, P);
-    end
-    A = rebuildAdjacency(nodes, P);
-    [pathIds, distVal] = dijkstraSparse(A, startId, goalId);
-end
 
 if isempty(pathIds)
     warning('No path found in the graph (graph may be disconnected).');
@@ -242,19 +228,6 @@ function poly = buildRectNode(qrand, obs, workPoly, P)
     end
 end
 
-function poly = expandNode(poly, center, theta, obs, workPoly, P)
-    % used by Method 2 after graph search
-    if P.asymExpand
-        [aP,aM,bP,bM] = rectExtentsAsym(poly, center, theta);
-        [aP,aM,bP,bM] = expandAsymExtents(center, theta, aP,aM,bP,bM, obs, workPoly, P);
-        poly = rectPolyAsym(center, aP,aM,bP,bM, theta);
-    else
-        [hx,hy] = rectHalfSizesSym(poly, center, theta);
-        [hx,hy] = expandSymHalfSizes(center, theta, hx,hy, obs, workPoly, P);
-        poly = rectPolySym(center, hx,hy, theta);
-    end
-end
-
 function [aP,aM,bP,bM] = expandAsymExtents(c, theta, aP,aM,bP,bM, obs, workPoly, P)
     % +u
     while aP + P.expandStep <= P.maxHalfSize(1)
@@ -325,12 +298,9 @@ end
 
 function nodes = addPointAsNode(nodes, q, obs, workPoly, P, tag)
     % Create node polygon + theta depending on method
-    if P.method == 1
-        theta = 0;
-        poly  = buildRectNode(q, obs, workPoly, P);
-    else
-        [poly, theta] = buildInitialSquare(q, obs, workPoly, P);
-    end
+    
+    theta = 0;
+    poly  = buildRectNode(q, obs, workPoly, P);
 
     if isempty(poly)
         theta = 0;
