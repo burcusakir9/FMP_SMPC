@@ -1,14 +1,14 @@
 %%  SNG (Sampling-Based Neighborhood Graph)
 
 clear; clc; close all;
-rng(5);
+rng(5); % seed
 
 % Choose scenario
-scenarioId = 1;                % set 1 or 2
+scenarioId = 1;   % 1 or 2
 [W, obs, q_start, q_goal] = getScenario(scenarioId);
 
 %% ------------------ SNG PARAMETERS -------------------------
-P.asymExpand = false;           % true = asymmetric growth, false = symmetric growth
+P.asymExpand = false; % true = asymmetric growth, false = symmetric growth
 
 P.maxNodes        = 100;
 P.maxTriesPerNode = 200;
@@ -21,15 +21,16 @@ P.safetyMargin  = 0.0;
 P.expandStep    = 0.05;
 
 %% ------------------ BUILD SNG GRAPH ------------------------
+% polyshape, centroid, index, orientation
 nodes = struct('poly', {}, 'c', {}, 'id', {}, 'theta', {});
-A = sparse(0,0);
 
-workPoly = polyshape([W(1) W(2) W(2) W(1)],[W(3) W(3) W(4) W(4)]);
+workPoly = polyshape([W(1) W(2) W(2) W(1)],[W(3) W(3) W(4) W(4)]); % map border polygon
 
+% Check wheter the start and goal points are empty
 assert(isFreePoint(q_start, obs, workPoly), 'Start is in obstacle/outside workspace.');
 assert(isFreePoint(q_goal,  obs, workPoly), 'Goal is in obstacle/outside workspace.');
 
-accepted = 0;
+accepted = 0; % Number of accepted nodes
 
 while accepted < P.maxNodes
     success = false;
@@ -38,13 +39,13 @@ while accepted < P.maxNodes
         q = sampleFreePoint(W, obs, workPoly);
         if isempty(q), continue; end
 
-        theta = 0; %#ok<NASGU>
+        theta = 0;
         nodePoly = buildRectNode(q, obs, workPoly, P);   % expanded node
-        theta = 0;  % stored but not needed for method 1
         
         if isempty(nodePoly), continue; end
         if area(nodePoly) < P.minRectArea, continue; end
 
+        % add the node to list
         accepted = accepted + 1;
         nodes(accepted).poly   = nodePoly;
         nodes(accepted).theta  = theta;
@@ -70,6 +71,9 @@ startId = numel(nodes);
 nodes = addPointAsNode(nodes, q_goal, obs, workPoly, P, "GOAL");
 goalId = numel(nodes);
 
+% A(i,j) = weight if node i and j overlap
+% A(i,j) = 0 if they don’t
+A = sparse(0,0);
 A = rebuildAdjacency(nodes, P);
 
 %% ------------------ SHORTEST NODE-PATH ---------------------
@@ -426,7 +430,7 @@ function [path, distVal] = dijkstraSparse(A, s, t)
 
     path = t;
     while path(1) ~= s
-        path = [prev(path(1)); path]; %#ok<AGROW>
+        path = [prev(path(1)); path]; 
         if path(1)==0
             path = []; distVal=inf; return;
         end
