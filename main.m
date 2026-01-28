@@ -10,7 +10,7 @@ scenarioId = 1;   % 1 or 2
 %% ------------------ SNG PARAMETERS -------------------------
 P.asymExpand = false; % true = asymmetric growth, false = symmetric growth
 
-P.maxNodes        = 100;
+P.maxNodes        = 80;
 P.maxTriesPerNode = 200;
 
 P.overlapThreshold = 1e-6;
@@ -23,6 +23,10 @@ P.expandStep    = 0.05;
 %% ------------------ BUILD SNG GRAPH ------------------------
 % polyshape, centroid, index, orientation
 nodes = struct('poly', {}, 'c', {}, 'id', {}, 'theta', {});
+
+% A(i,j) = weight if node i and j overlap
+% A(i,j) = 0 if they don’t
+A = sparse(0,0);
 
 workPoly = polyshape([W(1) W(2) W(2) W(1)],[W(3) W(3) W(4) W(4)]); % map border polygon
 
@@ -53,6 +57,15 @@ while accepted < P.maxNodes
         nodes(accepted).c      = [cx, cy];
         nodes(accepted).id     = accepted;
 
+        for j = 1:accepted-1
+            ov = intersect(nodes(accepted).poly, nodes(j).poly);
+            if ~isempty(ov) && area(ov) > P.overlapThreshold
+                w = norm(nodes(accepted).c - nodes(j).c);  % edge cost = center distance
+                A(accepted, j) = w;
+                A(j, accepted) = w;
+            end
+        end
+
         success = true;
         break;
     end
@@ -68,13 +81,30 @@ fprintf('Accepted nodes: %d\n', accepted);
 nodes = addPointAsNode(nodes, q_start, obs, workPoly, P, "START");
 startId = numel(nodes);
 
+A(startId, startId) = 0;
+for j = 1:startId-1
+    ov = intersect(nodes(startId).poly, nodes(j).poly);
+    if ~isempty(ov) && area(ov) > P.overlapThreshold
+        w = norm(nodes(startId).c - nodes(j).c);
+        A(startId, j) = w; 
+        A(j, startId) = w;
+    end
+end
+
+
 nodes = addPointAsNode(nodes, q_goal, obs, workPoly, P, "GOAL");
 goalId = numel(nodes);
 
-% A(i,j) = weight if node i and j overlap
-% A(i,j) = 0 if they don’t
-A = sparse(0,0);
-A = rebuildAdjacency(nodes, P);
+A(goalId, goalId) = 0;
+for j = 1:goalId-1
+    ov = intersect(nodes(goalId).poly, nodes(j).poly);
+    if ~isempty(ov) && area(ov) > P.overlapThreshold
+        w = norm(nodes(goalId).c - nodes(j).c);
+        A(goalId, j) = w; 
+        A(j, goalId) = w;
+    end
+end
+
 
 %% ------------------ SHORTEST NODE-PATH ---------------------
 [pathIds, distVal] = dijkstraSparse(A, startId, goalId);
@@ -186,21 +216,6 @@ function [qobs, dmin] = closestObstaclePoint(qrand, obs)
     end
 end
 
-function [poly, theta] = buildInitialSquare(qrand, obs, workPoly, P)
-    [qobs, dmin] = closestObstaclePoint(qrand, obs);
-    if isempty(qobs) || dmin <= 1e-6, poly=[]; theta=0; return; end
-
-    h = dmin / sqrt(2);
-    h = min(h, min(P.maxHalfSize));
-
-    v = qobs - qrand;
-    theta = atan2(v(2), v(1)) + pi/2;
-
-    poly = rectPolyAsym(qrand, h, h, h, h, theta);
-    if ~isPolyInsideWorkspace(poly, workPoly) || rectCollides(poly, obs, P.safetyMargin)
-        poly = []; theta = 0;
-    end
-end
 
 function poly = buildRectNode(qrand, obs, workPoly, P)
     % Method 1: initial square from dmin, then expand (sym or asym based on flag)
@@ -378,20 +393,6 @@ function [poly, ok] = growUntilOverlap(poly, center, theta, nodes, obs, workPoly
             poly = cand;
             if hasAnyOverlap(poly, nodes, P.overlapThreshold)
                 ok = true; return;
-            end
-        end
-    end
-end
-
-function A = rebuildAdjacency(nodes, P)
-    n = numel(nodes);
-    A = sparse(n,n);
-    for i=1:n
-        for j=i+1:n
-            ov = intersect(nodes(i).poly, nodes(j).poly);
-            if ~isempty(ov) && area(ov) > P.overlapThreshold
-                w = norm(nodes(i).c - nodes(j).c);
-                A(i,j)=w; A(j,i)=w;
             end
         end
     end
