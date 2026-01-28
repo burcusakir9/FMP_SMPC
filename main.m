@@ -1,3 +1,10 @@
+% 
+% TODO:  There is a bug that sometimes funnels are not parallel to obstacles.
+%         In second scenario still no path with suggested terminal
+%         condition constants
+% 
+% 
+
 %%  SNG (Sampling-Based Neighborhood Graph)
 
 clear; clc; close all;
@@ -10,15 +17,19 @@ scenarioId = 1;   % 1 or 2
 %% ------------------ SNG PARAMETERS -------------------------
 P.asymExpand = false; % true = asymmetric growth, false = symmetric growth
 
-P.maxNodes        = 80;
-P.maxTriesPerNode = 200;
-
 P.overlapThreshold = 1e-6;
 P.minRectArea      = 0.001;
 
 P.maxHalfSize   = [50.0, 50.0];
 P.safetyMargin  = 0.0;
 P.expandStep    = 0.05;
+
+alpha = 0.95;
+Pc    = 0.95;
+
+m_req = ceil(log(1-Pc)/log(alpha) - 1);
+m_fail = 0;                                  % consecutive failures counter
+
 
 %% ------------------ BUILD SNG GRAPH ------------------------
 % polyshape, centroid, index, orientation
@@ -35,45 +46,44 @@ assert(isFreePoint(q_start, obs, workPoly), 'Start is in obstacle/outside worksp
 assert(isFreePoint(q_goal,  obs, workPoly), 'Goal is in obstacle/outside workspace.');
 
 accepted = 0; % Number of accepted nodes
+m = 0;     
+while m < m_req
 
-while accepted < P.maxNodes
-    success = false;
-
-    for t = 1:P.maxTriesPerNode
-        q = sampleFreePoint(W, obs, workPoly);
-        if isempty(q), continue; end
-
-        theta = 0;
-        nodePoly = buildRectNode(q, obs, workPoly, P);   % expanded node
-        
-        if isempty(nodePoly), continue; end
-        if area(nodePoly) < P.minRectArea, continue; end
-
-        % add the node to list
-        accepted = accepted + 1;
-        nodes(accepted).poly   = nodePoly;
-        nodes(accepted).theta  = theta;
-        [cx, cy]               = centroid(nodePoly);
-        nodes(accepted).c      = [cx, cy];
-        nodes(accepted).id     = accepted;
-
-        for j = 1:accepted-1
-            ov = intersect(nodes(accepted).poly, nodes(j).poly);
-            if ~isempty(ov) && area(ov) > P.overlapThreshold
-                w = norm(nodes(accepted).c - nodes(j).c);  % edge cost = center distance
-                A(accepted, j) = w;
-                A(j, accepted) = w;
-            end
-        end
-
-        success = true;
-        break;
+    % Sample a free point (obstacle hits are internally rejected, not counted)
+    q = sampleFreePoint(W, obs, workPoly);
+    if isempty(q)
+        continue;   % ignore: not counted as failure
     end
 
-    if ~success
-        break;
+    % FAILURE = sample lies in already covered region (inside any existing node)
+    if accepted > 0 && isCovered(q, nodes)
+        m = m + 1;
+        continue;
     end
+
+    % SUCCESS attempt: build a new neighborhood around q
+    theta = 0;
+    nodePoly = buildRectNode(q, obs, workPoly, P);
+
+    if isempty(nodePoly) || area(nodePoly) < P.minRectArea
+        % ignore: not counted as failure in the paper's model
+        continue;
+    end
+
+    % Accept node (SUCCESS)
+    accepted = accepted + 1;
+    nodes(accepted).poly  = nodePoly;
+    nodes(accepted).theta = theta;
+    [cx, cy] = centroid(nodePoly);
+    nodes(accepted).c  = [cx, cy];
+    nodes(accepted).id = accepted;
+
+    % Reset failure counter after success
+    m = 0;
 end
+
+fprintf('Terminated: accepted=%d, m=%d (threshold=%d)\n', accepted, m, m_req);
+
 
 fprintf('Accepted nodes: %d\n', accepted);
 
@@ -81,29 +91,11 @@ fprintf('Accepted nodes: %d\n', accepted);
 nodes = addPointAsNode(nodes, q_start, obs, workPoly, P, "START");
 startId = numel(nodes);
 
-A(startId, startId) = 0;
-for j = 1:startId-1
-    ov = intersect(nodes(startId).poly, nodes(j).poly);
-    if ~isempty(ov) && area(ov) > P.overlapThreshold
-        w = norm(nodes(startId).c - nodes(j).c);
-        A(startId, j) = w; 
-        A(j, startId) = w;
-    end
-end
-
 
 nodes = addPointAsNode(nodes, q_goal, obs, workPoly, P, "GOAL");
 goalId = numel(nodes);
 
-A(goalId, goalId) = 0;
-for j = 1:goalId-1
-    ov = intersect(nodes(goalId).poly, nodes(j).poly);
-    if ~isempty(ov) && area(ov) > P.overlapThreshold
-        w = norm(nodes(goalId).c - nodes(j).c);
-        A(goalId, j) = w; 
-        A(j, goalId) = w;
-    end
-end
+A = rebuildAdjacency(nodes, P);
 
 
 %% ------------------ SHORTEST NODE-PATH ---------------------
@@ -315,6 +307,21 @@ function [hx,hy] = rectHalfSizesSym(poly, center, theta)
     hy = max(abs(Vr(:,2)));
 end
 
+function A = rebuildAdjacency(nodes, P)
+    n = numel(nodes);
+    A = sparse(n,n);
+    for i=1:n
+        for j=i+1:n
+            ov = intersect(nodes(i).poly, nodes(j).poly);
+            if ~isempty(ov) && area(ov) > P.overlapThreshold
+                w = norm(nodes(i).c - nodes(j).c);
+                A(i,j)=w; A(j,i)=w;
+            end
+        end
+    end
+end
+
+
 function nodes = addPointAsNode(nodes, q, obs, workPoly, P, tag)
     % Create node polygon + theta depending on method
     
@@ -437,4 +444,14 @@ function [path, distVal] = dijkstraSparse(A, s, t)
         end
     end
     distVal = dist(t);
+end
+
+function tf = isCovered(q, nodes)
+    tf = false;
+    for i = 1:numel(nodes)
+        if isinterior(nodes(i).poly, q(1), q(2))
+            tf = true;
+            return;
+        end
+    end
 end
