@@ -127,11 +127,9 @@ plot(q_goal(1),  q_goal(2),  'ro', 'MarkerSize',9, 'LineWidth',2);
 
 if ~isempty(pathIds)
     C = reshape([nodes(pathIds).c],2,[])';
-    plot(C(:,1), C(:,2), 'm-', 'LineWidth',3);
     plot(C(:,1), C(:,2), 'ms', 'MarkerSize',6, 'LineWidth',1.5);
 end
 
-legend({'Obstacles','Nodes','Start','Goal','Node-path'}, 'Location','northeastoutside');
 grid on;
 
 %% ===================== FUNCTIONS ===========================
