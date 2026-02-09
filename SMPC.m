@@ -12,7 +12,7 @@ rng(7);
 %% ------------------- Parameters -------------------
 dt = 0.05; %sampling time, seconds
 N  = 10;  % MPC horizon
-T  = 400; % simulation steps 
+T  = 250; % simulation steps 
 MC = 1; % Monte Carlo runs
 
 % Robot model
@@ -27,14 +27,16 @@ B = [0.5*dt^2 0;
      0 dt];
 
 C = [1 0 0 0;
-     0 1 0 0]; % position states are observable
+     0 1 0 0;
+     0 0 1 0;
+     0 0 0 1]; % position states are observable
 
 nx = size(A,1);
 nu = size(B,2);
 ny = size(C,1);
 
-Q = diag([1e-6, 1e-6, 1e-6, 1e-6]);   % process noise covariance
-R = diag([1e-6, 1e-6]);       % meaHrement noise covariance
+Q = B * diag([0.5, 0.5]) * B';   % process noise covariance
+R = diag([0.1, 0.1, 0.1, 0.1]);       % meaHrement noise covariance
 Qu = diag([0.05, 0.05]); % Input noise
 
 % Compute Cholesky factors in order to add noise,  Q = L_Q * L_Q'
@@ -43,17 +45,17 @@ L_R = chol(R, 'lower');
 L_Qu = chol(Qu, 'lower');
 
 % KF initial covariance
-P0 = diag([1e-6 1e-6 1e-6 1e-6]);
+P0 = 100 * eye(nx);
 
 % Map limits, linear constraints
 xmin = 0; xmax = 16;
 ymin = 0; ymax = 8;
 
-umax = 10.0; % max accel per axis (hard limit in deterministic MPC) TODO 3.0 causes problem i dont understand
+umax = 3.0; % max accel per axis (hard limit in deterministic MPC) TODO 3.0 causes problem i dont understand
 
 % Chance constraints
 beta_state = 0.05;   % probability of violating state bounds (per step, per axis, two-sided)
-beta_input = 0.005;   % probability of violating input bounds (per step, per axis, two-sided)
+beta_input = 0.05;   % probability of violating input bounds (per step, per axis, two-sided)
 
 % Chance constraints - 
 p_state = 1 - beta_state/2; % constraint is split into two for x and y TODO bunu tam anlamadım
@@ -63,8 +65,8 @@ p_input = 1 - beta_input/2;
 k_input = sqrt(2) * erfinv(2 * p_input - 1);
 
 % Cost weights
-Qpos = 100; % position tracking penalty
-Qvel = 2; % velocity penalty
+Qpos = 10; % position tracking penalty
+Qvel = 1.0; % velocity penalty
 Ru = 0.1; % input penalty
 Wx_single = diag([Qpos Qpos Qvel Qvel]); % stage weight on x
 Wu_single = Ru*eye(nu); % stage weight on u
@@ -78,11 +80,11 @@ waypoints = [ 1.0  1.0;
               13.5 6.5;
               15.0 5.0 ];
 
-wp_tol = 0.1; % switch waypoint when within this distance
+wp_tol = 0.5; % switch waypoint when within this distance
 
 % Initial true state and initial estimate
 x_true0 = [waypoints(1,1); waypoints(1,2); 0; 0];
-xhat0   = x_true0 + [0.05; -0.05; 0.1; -0.1];
+xhat0   = x_true0;
 
 %% ------------------- Precompute MPC prediction matrices -------------------
 
@@ -278,3 +280,18 @@ for mc = 1:MC
 end
 
 legend({'Workspace','Waypoints'}, 'Location','best');
+
+t = (0:size(U_hist,2)-1) * dt;
+
+figure('Color','w');
+subplot(2,1,1);
+plot(t, U_hist(1,:), 'b', 'LineWidth',1.5);
+grid on;
+ylabel('u_x [m/s^2]');
+title('Control inputs');
+
+subplot(2,1,2);
+plot(t, U_hist(2,:), 'r', 'LineWidth',1.5);
+grid on;
+xlabel('Time [s]');
+ylabel('u_y [m/s^2]');
