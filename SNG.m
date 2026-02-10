@@ -24,7 +24,7 @@ P.maxHalfSize   = [50.0, 50.0];
 P.safetyMargin  = 0.0;
 P.expandStep    = 0.05;
 
-alpha = 0.95;
+alpha = 0.98;
 Pc    = 0.95;
 
 m_req = ceil(log(1-Pc)/log(alpha) - 1);
