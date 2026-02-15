@@ -1,3 +1,4 @@
+% [map edges, obstacle polygons, start point, goal point]
 function [W, obs, q_start, q_goal] = getScenario(scn)
 
 switch scn
