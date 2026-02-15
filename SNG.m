@@ -1,9 +1,9 @@
-% 
-% TODO:  There is a bug that sometimes funnels are not parallel to obstacles.
-%         In second scenario still no path with suggested terminal
-%         condition constants
-% 
-% 
+%{
+TODO:
+- alpha and Pc variables must be replaced by an algorithm that keeps going
+until a path is found.
+-
+%}
 
 %%  SNG (Sampling-Based Neighborhood Graph)
 
@@ -12,6 +12,8 @@ rng(5); % seed
 
 % Choose scenario
 scenarioId = 1;   % 1 or 2
+
+% [map edges, obstacle polygons, start point, goal point]
 [W, obs, q_start, q_goal] = getScenario(scenarioId);
 
 %% ------------------ SNG PARAMETERS -------------------------
@@ -21,56 +23,54 @@ P.overlapThreshold = 1e-6;
 P.minRectArea      = 0.001;
 
 P.maxHalfSize   = [50.0, 50.0];
-P.safetyMargin  = 0.0;
+P.safetyMargin  = 0.01;
 P.expandStep    = 0.05;
 
-alpha = 0.98;
+alpha = 0.99;
 Pc    = 0.95;
 
 m_req = ceil(log(1-Pc)/log(alpha) - 1);
 m_fail = 0;                                  % consecutive failures counter
 
-
 %% ------------------ BUILD SNG GRAPH ------------------------
 % polyshape, centroid, index, orientation
 nodes = struct('poly', {}, 'c', {}, 'id', {}, 'theta', {});
 
-% A(i,j) = weight if node i and j overlap
-% A(i,j) = 0 if they don’t
-A = sparse(0,0);
-
-workPoly = polyshape([W(1) W(2) W(2) W(1)],[W(3) W(3) W(4) W(4)]); % map border polygon
+% Map border polygon
+workPoly = polyshape([W(1) W(2) W(2) W(1)],[W(3) W(3) W(4) W(4)]);
 
 % Check wheter the start and goal points are empty
 assert(isFreePoint(q_start, obs, workPoly), 'Start is in obstacle/outside workspace.');
 assert(isFreePoint(q_goal,  obs, workPoly), 'Goal is in obstacle/outside workspace.');
 
 accepted = 0; % Number of accepted nodes
+
 m = 0;     
 while m < m_req
 
-    % Sample a free point (obstacle hits are internally rejected, not counted)
+    % Sample a free point obstacle hits are rejected
     q = sampleFreePoint(W, obs, workPoly);
+
+    % If no point is found retry sampleFreePoint 
     if isempty(q)
-        continue;   % ignore: not counted as failure
+        continue; 
     end
 
-    % FAILURE = sample lies in already covered region (inside any existing node)
-    if accepted > 0 && isCovered(q, nodes)
+    % If newly sampled point is in a already covered region increase failure counter
+    if isCovered(q, nodes)
         m = m + 1;
         continue;
     end
 
-    % SUCCESS attempt: build a new neighborhood around q
-    theta = 0;
-    nodePoly = buildRectNode(q, obs, workPoly, P);
+    % Build the funnel around the sampled point
+    [nodePoly, theta] = buildRectNode(q, obs, workPoly, P);
 
+    % If created node is empty or does not meet minimum area requirement, skip without accepting
     if isempty(nodePoly) || area(nodePoly) < P.minRectArea
-        % ignore: not counted as failure in the paper's model
         continue;
     end
 
-    % Accept node (SUCCESS)
+    % Accept node 
     accepted = accepted + 1;
     nodes(accepted).poly  = nodePoly;
     nodes(accepted).theta = theta;
@@ -83,22 +83,21 @@ while m < m_req
 end
 
 fprintf('Terminated: accepted=%d, m=%d (threshold=%d)\n', accepted, m, m_req);
-
-
 fprintf('Accepted nodes: %d\n', accepted);
 
-% Add start and goal nodes (guarantee they overlap at least one existing node)
+% Add start and goal nodes 
 nodes = addPointAsNode(nodes, q_start, obs, workPoly, P, "START");
 startId = numel(nodes);
-
 
 nodes = addPointAsNode(nodes, q_goal, obs, workPoly, P, "GOAL");
 goalId = numel(nodes);
 
+% A(i,j) = weight if node i and j overlap
+% A(i,j) = 0 if they don’t
 A = rebuildAdjacency(nodes, P);
 
-
 %% ------------------ SHORTEST NODE-PATH ---------------------
+
 [pathIds, distVal] = dijkstraSparse(A, startId, goalId);
 
 if isempty(pathIds)
@@ -110,30 +109,70 @@ end
 fprintf('deg(start)=%d, deg(goal)=%d\n', nnz(A(startId,:)), nnz(A(goalId,:)));
 
 %% ------------------ PLOTTING -------------------------------
+
+% SNG figure
 figure('WindowState','maximized', 'Color','w'); hold on; axis equal;
 xlim([W(1) W(2)]); ylim([W(3) W(4)]);
-title('SNG: obstacles, nodes, and node-path');
+title('Figür 1: SNG - Tüm Kapsama Alanı (Funnels)');
 
+% Plot obstacles
 for i=1:numel(obs)
     plot(obs{i}, 'FaceColor',[0 0 0], 'FaceAlpha',0.6, 'EdgeColor','none');
 end
 
+% Plot nodes
 for i=1:numel(nodes)
     plot(nodes(i).poly, 'FaceColor',[0.7 0.85 1.0], 'FaceAlpha',0.10, 'EdgeColor',[0.3 0.6 1.0], 'LineWidth',0.5);
 end
 
+% Plot start and goal points
 plot(q_start(1), q_start(2), 'go', 'MarkerSize',9, 'LineWidth',2);
 plot(q_goal(1),  q_goal(2),  'ro', 'MarkerSize',9, 'LineWidth',2);
-
-if ~isempty(pathIds)
-    C = reshape([nodes(pathIds).c],2,[])';
-    plot(C(:,1), C(:,2), 'ms', 'MarkerSize',6, 'LineWidth',1.5);
-end
-
 grid on;
 
+% Dijkstra figure
+figure('WindowState','maximized', 'Color','w'); hold on; axis equal;
+xlim([W(1) W(2)]); ylim([W(3) W(4)]);
+title('Figür 2: Dijkstra - Seçilen Yol ve Kesişim Waypointleri');
+
+% Plot obstacles
+for i=1:numel(obs)
+    plot(obs{i}, 'FaceColor',[0 0 0], 'FaceAlpha',0.6, 'EdgeColor','none');
+end
+
+if ~isempty(pathIds)
+    % Plot only the nodes in Dijkstra solutionn
+    for k = 1:length(pathIds)
+        node_idx = pathIds(k);
+        plot(nodes(node_idx).poly, 'FaceColor',[1.0 0.85 0.7], 'FaceAlpha',0.40, 'EdgeColor',[1.0 0.5 0.0], 'LineWidth',1.5);
+    end
+    
+    num_nodes = length(pathIds);
+    route_points = zeros(num_nodes + 1, 2); 
+    route_points(1, :) = q_start; 
+    
+    for k = 1:(num_nodes - 1)
+        curr_node = nodes(pathIds(k)).poly;
+        next_node = nodes(pathIds(k+1)).poly;
+        
+        intersection_poly = intersect(curr_node, next_node);
+        [cx, cy] = centroid(intersection_poly);
+        route_points(k+1, :) = [cx, cy];
+    end
+    
+    route_points(end, :) = q_goal; 
+    
+    % Plot cross points
+    plot(route_points(:,1), route_points(:,2), 'bo', 'MarkerSize',6, 'LineWidth',1.5);
+end
+
+% Plot start and goal points
+plot(q_start(1), q_start(2), 'go', 'MarkerSize',9, 'LineWidth',2);
+plot(q_goal(1),  q_goal(2),  'ro', 'MarkerSize',9, 'LineWidth',2);
+grid on;
 %% ===================== FUNCTIONS ===========================
 
+% point = sampleFreePoint(map corner points, obstacles, map polygon)
 function q = sampleFreePoint(W, obs, workPoly)
     for t=1:200
         q = [W(1) + (W(2)-W(1))*rand, W(3) + (W(4)-W(3))*rand];
@@ -142,6 +181,7 @@ function q = sampleFreePoint(W, obs, workPoly)
     q = [];
 end
 
+% ok = isFreePoint(point, obstacles, map polygon)
 function ok = isFreePoint(q, obs, workPoly)
     if ~isinterior(workPoly, q(1), q(2)), ok=false; return; end
     for i=1:numel(obs)
@@ -207,8 +247,12 @@ function [qobs, dmin] = closestObstaclePoint(qrand, obs)
 end
 
 
-function poly = buildRectNode(qrand, obs, workPoly, P)
-    % Method 1: initial square from dmin, then expand (sym or asym based on flag)
+function [poly, theta] = buildRectNode(qrand, obs, workPoly, P)
+    
+    poly = [];
+    theta = 0;
+
+    % Method 1: initial square from dmin, then expand
     [qobs, dmin] = closestObstaclePoint(qrand, obs);
     if isempty(qobs) || ~isfinite(dmin) || dmin <= 1e-6, poly=[]; return; end
 
@@ -323,8 +367,7 @@ end
 function nodes = addPointAsNode(nodes, q, obs, workPoly, P, tag)
     % Create node polygon + theta depending on method
     
-    theta = 0;
-    poly  = buildRectNode(q, obs, workPoly, P);
+    [poly, theta] = buildRectNode(q, obs, workPoly, P);
 
     if isempty(poly)
         theta = 0;
@@ -444,6 +487,7 @@ function [path, distVal] = dijkstraSparse(A, s, t)
     distVal = dist(t);
 end
 
+% Check if the point is in any of the nodes
 function tf = isCovered(q, nodes)
     tf = false;
     for i = 1:numel(nodes)
