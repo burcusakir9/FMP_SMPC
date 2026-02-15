@@ -1,23 +1,27 @@
-%% MPC
+%{
+TODO:
+- 
+%}
 %% Parameters
-dt = 0.05; 
-N  = 30;  
-T  = 100; 
+
+dt = 0.05; % sample time
+N  = 10; % horizon
+T  = 100; % Simnulation steps
 nx = 3; % [px, py, theta]
 nu = 2; % [v, w]
 
-% Limits
+% Input limits
 v_max = 10.0; 
 w_max = 10.0; 
 
-% Waypoints
 % Waypoints extraction from pathIds
 num_wp = length(pathIds);
 waypoints = zeros(num_wp, 2);
 
-% İlk hedef başlangıç noktanız
+% Add start point to the waypoint list
 waypoints(1, :) = q_start;
 
+% Add intersection points to the waypoint list
 for i = 1:(num_wp - 1)
     curr_node = nodes(pathIds(i)).poly;
     next_node = nodes(pathIds(i+1)).poly;
@@ -28,14 +32,13 @@ for i = 1:(num_wp - 1)
     waypoints(i+1, :) = [cx, cy];
 end
 
-% Son hedef varış noktanız
+% Add end point to the waypoint list
 waypoints(end+1, :) = q_goal; 
-% --------------------------------------------------
 
-wp_tol = 0.5; 
+wp_tol = 0.5;  % waypoint tolerance to skip to the next
 current_wp_idx = 2; 
 target = waypoints(current_wp_idx, :)'; 
-x_true = [waypoints(1,1); waypoints(1,2); 0];
+x_true = [waypoints(1,1); waypoints(1,2); 0]; % Robot starts at the start point
 
 % Storage
 history_x = zeros(nx, T);
@@ -45,34 +48,29 @@ options = optimoptions('quadprog','Display','off');
 
 %% Simulation Loop
 for t = 1:T
-    % --- 1. Waypoint Logic (UPDATED for Stopping) ---
+    % Waypoint Logic
     dist_to_target = norm(x_true(1:2) - target(1:2));
-    
-    % Son waypoint'te miyiz kontrolü
+
     is_last_waypoint = (current_wp_idx == size(waypoints, 1));
     
     if dist_to_target < wp_tol
         if is_last_waypoint
-            % Eğer son noktadaysak: BREAK YAPMA. Sadece bekle.
             disp(['Final destination reached. Station Keeping... (Step: ' num2str(t) ')']);
             
-            % Daha hassas duruş için toleransı daraltabiliriz (Opsiyonel)
-            wp_tol = 0.5; 
-            
-            % Eğer tamamen durduysa (Hız ~ 0 ve Konum < 0.1) simülasyonu bitir
+            % Stop
             if dist_to_target < 0.1 && norm(history_u(:, t-1)) < 0.05
                  disp('Robot has fully stopped. Simulation End.');
                  break;
             end
         else
-            % Son nokta değilse, bir sonrakine geç
+            % If not last waypoint, iterate
             disp(['Waypoint ' num2str(current_wp_idx) ' reached!']);
             current_wp_idx = current_wp_idx + 1;
             target = waypoints(current_wp_idx, :)';
         end
     end
 
-    % --- 2. Linearization (LTV) ---
+    % Linearization
     th = x_true(3);
     v_ref = 1.0; 
     
@@ -83,7 +81,7 @@ for t = 1:T
          sin(th)*dt  0;
          0           dt];
 
-   % --- 3. Local Coordinate Shift (Karagoz Method) ---
+   % Local Coordinate Shift
     xr = target(1);
     yr = target(2);
     
@@ -91,7 +89,7 @@ for t = 1:T
     dy = yr - x_true(2);
     raw_target_theta = atan2(dy, dx);
     
-    % Yerel duruma (Local State) geçiş: x_bar = x - x_ref
+    % Local state
     x_bar = zeros(3, 1);
     x_bar(1) = x_true(1) - xr;
     x_bar(2) = x_true(2) - yr;
@@ -103,7 +101,7 @@ for t = 1:T
         x_bar(3) = -atan2(sin(delta_theta), cos(delta_theta)); 
     end
     
-    % --- 4. MPC Matrices ---
+    % MPC Matrices
     Q = diag([10, 10, 0.5]); 
     R = diag([0.1, 0.1]);
     
@@ -122,18 +120,17 @@ for t = 1:T
     Q_bar = kron(eye(N), Q);
     R_bar = kron(eye(N), R);
     
-    % Yerel çerçevede referans noktası orijindir (0,0,0)
+    % Origin in local reference frame
     Ref = zeros(nx*N, 1);
     
     H_qp = Gamma' * Q_bar * Gamma + R_bar;
     f_qp = (x_bar' * Phi' * Q_bar * Gamma - Ref' * Q_bar * Gamma)';
     
-    % --- 5. Funnel (Polygon) Constraints ---
-    % Aracın içinde bulunduğu node'un ID'sini bul
+    % Funnel Constraints
     current_node_id = pathIds(current_wp_idx - 1);
     curr_poly = nodes(current_node_id).poly;
     
-    % Poligon sınırlarını [A_poly * x <= b_poly] formatına çevir
+    % Poligon limits [A_poly * x <= b_poly] 
     [vx, vy] = boundary(curr_poly);
     if isnan(vx(end)), vx(end)=[]; vy(end)=[]; end
     if vx(1)==vx(end) && vy(1)==vy(end), vx(end)=[]; vy(end)=[]; end
@@ -149,7 +146,6 @@ for t = 1:T
         edge_vec = p2 - p1;
         normal = [edge_vec(2), -edge_vec(1)]; % Normal vektör
         
-        % Dışa doğru baktığından emin ol
         if dot(normal, node_centroid - p1) > 0
             normal = -normal; 
         end
@@ -159,23 +155,22 @@ for t = 1:T
         b_poly(k) = dot(normal, p1);
     end
     
-    % Kısıtlamaları N adımlık MPC ufku için genişlet
-    % Yerel eksen kayması: A_poly * (x_bar + x_r) <= b_poly => A_poly * x_bar <= b_poly - A_poly * x_r
+
+    % Local frame shift: A_poly * (x_bar + x_r) <= b_poly => A_poly * x_bar <= b_poly - A_poly * x_r
     A_rep = kron(eye(N), A_poly);
     b_rep = repmat(b_poly - A_poly * [xr; yr], N, 1);
     
-    % Phi ve Gamma'dan sadece (x,y) satırlarını çıkaran filtre matrisi
     C_pos = kron(eye(N), [1 0 0; 0 1 0]); 
     
-    % Eşitsizlik Kısıtlamaları: A_ineq * U <= b_ineq
+    % Inequality constraints: A_ineq * U <= b_ineq
     A_ineq = A_rep * C_pos * Gamma;
     b_ineq = b_rep - A_rep * C_pos * Phi * x_bar;
     
-    % Fiziksel Hız Kısıtlamaları
+    % Input constraints
     lb = repmat([-v_max; -w_max], N, 1);
     ub = repmat([ v_max;  w_max], N, 1);
     
-    % --- 6. Solve ---
+    % Solve
     [U_opt, ~, exitflag] = quadprog(H_qp, f_qp, A_ineq, b_ineq, [], [], lb, ub, [], options);
     
     if exitflag ~= 1
@@ -185,8 +180,7 @@ for t = 1:T
         u_apply = U_opt(1:2);
     end
     
-    % !!! BU KISIM EKSİKTİ - GERİ EKLENDİ !!!
-    % --- 7. Apply to Real Plant ---
+    % Apply to Real Plant
     x_true(1) = x_true(1) + u_apply(1) * cos(x_true(3)) * dt;
     x_true(2) = x_true(2) + u_apply(1) * sin(x_true(3)) * dt;
     x_true(3) = x_true(3) + u_apply(2) * dt;
@@ -194,9 +188,8 @@ for t = 1:T
     
     history_x(:, t) = x_true;
     history_u(:, t) = u_apply;
-    % !!! ------------------------------- !!!
-    
-end % <-- For döngüsü burada bitmeli
+
+end
 
 % Truncate
 if t < T
@@ -210,18 +203,15 @@ history_u = history_u(:, 1:final_step);
 
 %% Plotting
 
-% --- FİGÜR 2: Dijkstra Çıktısı (Sadece kullanılan düğümler ve Waypoint'ler) ---
 figure('WindowState','maximized', 'Color','w'); hold on; axis equal;
 xlim([W(1) W(2)]); ylim([W(3) W(4)]);
 title('Figür 2: Dijkstra - Seçilen Yol ve Kesişim Waypointleri');
 
-% Engelleri çiz
 for i=1:numel(obs)
     plot(obs{i}, 'FaceColor',[0 0 0], 'FaceAlpha',0.6, 'EdgeColor','none');
 end
 
 if ~isempty(pathIds)
-    % SADECE yoldaki düğümleri belirgin bir renkle (ör: turuncu) çiz
     for k = 1:length(pathIds)
         node_idx = pathIds(k);
         plot(nodes(node_idx).poly, 'FaceColor',[1.0 0.85 0.7], 'FaceAlpha',0.40, 'EdgeColor',[1.0 0.5 0.0], 'LineWidth',1.5);
@@ -242,11 +232,9 @@ if ~isempty(pathIds)
     
     route_points(end, :) = q_goal; 
     
-    % Kesişim noktalarını ve aralarındaki yolu çiz
     plot(route_points(:,1), route_points(:,2), 'bo', 'MarkerSize',6, 'LineWidth',1.5);
 end
 
-% Başlangıç ve bitiş
 plot(q_start(1), q_start(2), 'go', 'MarkerSize',9, 'LineWidth',2);
 plot(q_goal(1),  q_goal(2),  'ro', 'MarkerSize',9, 'LineWidth',2);
 grid on;

@@ -2,7 +2,7 @@
 TODO:
 - alpha and Pc variables must be replaced by an algorithm that keeps going
 until a path is found.
--
+- Dijkstra doğru mu arama yapıyor?
 %}
 
 %%  SNG (Sampling-Based Neighborhood Graph)
