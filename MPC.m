@@ -5,14 +5,16 @@ TODO:
 %% Parameters
 
 dt = 0.05; % sample time
-N  = 10; % horizon
-T  = 100; % Simnulation steps
+
+N = 5;
+
+T  = 300; % Simnulation steps
 nx = 3; % [px, py, theta]
 nu = 2; % [v, w]
 
 % Input limits
-v_max = 10.0; 
-w_max = 10.0; 
+v_max = 10.0; % m/s
+w_max = 5.0; % rad/s
 
 % Waypoints extraction from pathIds
 num_wp = length(pathIds);
@@ -155,7 +157,6 @@ for t = 1:T
         b_poly(k) = dot(normal, p1);
     end
     
-
     % Local frame shift: A_poly * (x_bar + x_r) <= b_poly => A_poly * x_bar <= b_poly - A_poly * x_r
     A_rep = kron(eye(N), A_poly);
     b_rep = repmat(b_poly - A_poly * [xr; yr], N, 1);
