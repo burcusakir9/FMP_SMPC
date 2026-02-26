@@ -1,206 +1,128 @@
 %{
 TODO:
-- 
+- Spiralling around goal point
+- Chattering in the input
 %}
+
 %% Parameters
 
-dt = 0.05; % sample time
-
-N = 5;
-
-T  = 300; % Simnulation steps
+dt = 0.05; % Sample time
+N = 10; % MPC Horizon
+T  = 600; % Simnulation steps
 nx = 3; % [px, py, theta]
 nu = 2; % [v, w]
-
-% Input limits
-v_max = 10.0; % m/s
-w_max = 5.0; % rad/s
+v_max = 2.0; % m/s
+w_max = 1.0; % rad/s
 
 % Waypoints extraction from pathIds
 num_wp = length(pathIds);
 waypoints = zeros(num_wp, 2);
-
-% Add start point to the waypoint list
 waypoints(1, :) = q_start;
 
-% Add intersection points to the waypoint list
 for i = 1:(num_wp - 1)
-    curr_node = nodes(pathIds(i)).poly;
-    next_node = nodes(pathIds(i+1)).poly;
-    
-    % Hedef = İki düğümün kesişiminin merkezi (Her iki poligonun da içindedir!)
-    intersection_poly = intersect(curr_node, next_node);
+    intersection_poly = intersect(nodes(pathIds(i)).poly, nodes(pathIds(i+1)).poly);
     [cx, cy] = centroid(intersection_poly);
     waypoints(i+1, :) = [cx, cy];
 end
+waypoints(end, :) = q_goal;
 
-% Add end point to the waypoint list
-waypoints(end+1, :) = q_goal; 
 
-wp_tol = 0.5;  % waypoint tolerance to skip to the next
-current_wp_idx = 2; 
-target = waypoints(current_wp_idx, :)'; 
-x_true = [waypoints(1,1); waypoints(1,2); 0]; % Robot starts at the start point
-
-% Storage
+% Initialization
+x_robot = [q_start(1); q_start(2); 0]; % [x; y; theta]
+target_idx = 2; 
+wp_tol = 0.3;
 history_x = zeros(nx, T);
 history_u = zeros(nu, T);
+options = optimoptions('quadprog', 'Display', 'off');
 
-options = optimoptions('quadprog','Display','off');
 
 %% Simulation Loop
+
+fprintf('Starting MPC Simulation...\n');
+
 for t = 1:T
     % Waypoint Logic
-    dist_to_target = norm(x_true(1:2) - target(1:2));
-
-    is_last_waypoint = (current_wp_idx == size(waypoints, 1));
-    
-    if dist_to_target < wp_tol
-        if is_last_waypoint
-            disp(['Final destination reached. Station Keeping... (Step: ' num2str(t) ')']);
-            
-            % Stop
-            if dist_to_target < 0.1 && norm(history_u(:, t-1)) < 0.05
-                 disp('Robot has fully stopped. Simulation End.');
-                 break;
-            end
-        else
-            % If not last waypoint, iterate
-            disp(['Waypoint ' num2str(current_wp_idx) ' reached!']);
-            current_wp_idx = current_wp_idx + 1;
-            target = waypoints(current_wp_idx, :)';
-        end
+    target = waypoints(target_idx, :)';
+    if norm(x_robot(1:2) - target) < wp_tol && target_idx < size(waypoints, 1)
+        target_idx = target_idx + 1;
+        target = waypoints(target_idx, :)';
     end
-
+    
     % Linearization
-    th = x_true(3);
-    v_ref = 1.0; 
-    
-    A = [1 0 -v_ref*sin(th)*dt;
-         0 1  v_ref*cos(th)*dt;
-         0 0  1];
-    B = [cos(th)*dt  0;
-         sin(th)*dt  0;
-         0           dt];
-
-   % Local Coordinate Shift
-    xr = target(1);
-    yr = target(2);
-    
-    dx = xr - x_true(1);
-    dy = yr - x_true(2);
-    raw_target_theta = atan2(dy, dx);
-    
-    % Local state
-    x_bar = zeros(3, 1);
-    x_bar(1) = x_true(1) - xr;
-    x_bar(2) = x_true(2) - yr;
-    
-    if dist_to_target < 0.5
-        x_bar(3) = 0; 
+    yaw = x_robot(3);
+    if t == 1
+        v_ref = 0.1;
     else
-        delta_theta = raw_target_theta - x_true(3);
-        x_bar(3) = -atan2(sin(delta_theta), cos(delta_theta)); 
+        v_ref = max(abs(history_u(1, t-1)), 0.1);
     end
     
-    % MPC Matrices
-    Q = diag([10, 10, 0.5]); 
-    R = diag([0.1, 0.1]);
+    A = [1, 0, -v_ref*sin(yaw)*dt; 
+         0, 1,  v_ref*cos(yaw)*dt; 
+         0, 0,  1];
+    B = [cos(yaw)*dt, 0; 
+         sin(yaw)*dt, 0; 
+         0,           dt];
     
-    Phi = zeros(nx*N, nx);
-    Gamma = zeros(nx*N, nu*N);
-    temp_A = A;
+    % Shift to target-relative frame
+    xr = target(1); yr = target(2);
+    x_bar = [x_robot(1)-xr; x_robot(2)-yr; 0];
+    target_theta = atan2(yr - x_robot(2), xr - x_robot(1));
+    d_th = target_theta - x_robot(3);
+    x_bar(3) = -atan2(sin(d_th), cos(d_th));
+    
+    % MPC Prediction Matrices
+    Phi = zeros(3*N, 3); 
+    Gamma = zeros(3*N, 2*N);
     for i = 1:N
-        Phi((i-1)*nx+1:i*nx, :) = temp_A;
+        Phi((i-1)*3+1:i*3, :) = A^i;
         for j = 1:i
-             if j == i, mult = B; else, mult = (A^(i-j))*B; end
-             Gamma((i-1)*nx+1:i*nx, (j-1)*nu+1:j*nu) = mult;
+            Gamma((i-1)*3+1:i*3, (j-1)*2+1:j*2) = (A^(i-j))*B;
         end
-        temp_A = temp_A * A;
     end
     
-    Q_bar = kron(eye(N), Q);
-    R_bar = kron(eye(N), R);
+    % Cost: J = X'*Q*X + U'*R*U
+    Q_b = kron(eye(N), diag([40, 40, 1])); 
+    R_b = kron(eye(N), diag([0.1, 0.1]));
+    H = 2 * (Gamma' * Q_b * Gamma + R_b); H = (H + H')/2;
+    f = 2 * (x_bar' * Phi' * Q_b * Gamma)';
     
-    % Origin in local reference frame
-    Ref = zeros(nx*N, 1);
+    % Funnel Constraints (Ax <= b)
+    curr_node_id = pathIds(min(target_idx-1, length(pathIds)));
+    [vx, vy] = boundary(nodes(curr_node_id).poly);
+    valid = ~isnan(vx); vx=vx(valid); vy=vy(valid);
+    if ~isempty(vx) && vx(1)==vx(end), vx(end)=[]; vy(end)=[]; end
     
-    H_qp = Gamma' * Q_bar * Gamma + R_bar;
-    f_qp = (x_bar' * Phi' * Q_bar * Gamma - Ref' * Q_bar * Gamma)';
-    
-    % Funnel Constraints
-    current_node_id = pathIds(current_wp_idx - 1);
-    curr_poly = nodes(current_node_id).poly;
-    
-    % Poligon limits [A_poly * x <= b_poly] 
-    [vx, vy] = boundary(curr_poly);
-    if isnan(vx(end)), vx(end)=[]; vy(end)=[]; end
-    if vx(1)==vx(end) && vy(1)==vy(end), vx(end)=[]; vy(end)=[]; end
-    
-    num_edges = length(vx);
-    A_poly = zeros(num_edges, 2);
-    b_poly = zeros(num_edges, 1);
-    node_centroid = nodes(current_node_id).c;
-    
-    for k = 1:num_edges
-        p1 = [vx(k), vy(k)];
-        p2 = [vx(mod(k, num_edges)+1), vy(mod(k, num_edges)+1)];
-        edge_vec = p2 - p1;
-        normal = [edge_vec(2), -edge_vec(1)]; % Normal vektör
-        
-        if dot(normal, node_centroid - p1) > 0
-            normal = -normal; 
-        end
-        normal = normal / norm(normal);
-        
-        A_poly(k, :) = normal;
-        b_poly(k) = dot(normal, p1);
+    num_e = length(vx); A_p = zeros(num_e, 2); b_p = zeros(num_e, 1);
+    center = nodes(curr_node_id).c;
+    for k = 1:num_e
+        p1 = [vx(k), vy(k)]; p2 = [vx(mod(k,num_e)+1), vy(mod(k,num_e)+1)];
+        nv = [p2(2)-p1(2), -(p2(1)-p1(1))];
+        if dot(nv, center - p1) < 0, nv = -nv; end
+        nv = nv/norm(nv);
+        A_p(k,:) = -nv; b_p(k) = dot(-nv, p1);
     end
     
-    % Local frame shift: A_poly * (x_bar + x_r) <= b_poly => A_poly * x_bar <= b_poly - A_poly * x_r
-    A_rep = kron(eye(N), A_poly);
-    b_rep = repmat(b_poly - A_poly * [xr; yr], N, 1);
-    
-    C_pos = kron(eye(N), [1 0 0; 0 1 0]); 
-    
-    % Inequality constraints: A_ineq * U <= b_ineq
-    A_ineq = A_rep * C_pos * Gamma;
-    b_ineq = b_rep - A_rep * C_pos * Phi * x_bar;
-    
-    % Input constraints
-    lb = repmat([-v_max; -w_max], N, 1);
-    ub = repmat([ v_max;  w_max], N, 1);
+    C_pos = kron(eye(N), [1 0 0; 0 1 0]);
+    A_ineq = kron(eye(N), A_p) * C_pos * Gamma;
+    b_ineq = repmat(b_p, N, 1) - kron(eye(N), A_p) * (C_pos*Phi*x_bar + repmat([xr;yr], N, 1));
     
     % Solve
-    [U_opt, ~, exitflag] = quadprog(H_qp, f_qp, A_ineq, b_ineq, [], [], lb, ub, [], options);
+    lb = repmat([-v_max; -w_max], N, 1); 
+    ub = repmat([ v_max;  w_max], N, 1);
+    [U_opt, ~, exitflag] = quadprog(H, f, A_ineq, b_ineq, [], [], lb, ub, [], options);
     
-    if exitflag ~= 1
-        disp(['QP Infeasible at step ' num2str(t) ' - applying brakes.']);
-        u_apply = [0;0];
-    else
-        u_apply = U_opt(1:2);
-    end
+    % Apply
+    if exitflag == 1, u_apply = U_opt(1:2); else, u_apply = [0.1; 0]; end
     
-    % Apply to Real Plant
-    x_true(1) = x_true(1) + u_apply(1) * cos(x_true(3)) * dt;
-    x_true(2) = x_true(2) + u_apply(1) * sin(x_true(3)) * dt;
-    x_true(3) = x_true(3) + u_apply(2) * dt;
-    x_true(3) = atan2(sin(x_true(3)), cos(x_true(3)));
+    x_robot(1) = x_robot(1) + u_apply(1)*cos(x_robot(3))*dt;
+    x_robot(2) = x_robot(2) + u_apply(1)*sin(x_robot(3))*dt;
+    x_robot(3) = x_robot(3) + u_apply(2)*dt;
+    x_robot(3) = atan2(sin(x_robot(3)), cos(x_robot(3)));
     
-    history_x(:, t) = x_true;
-    history_u(:, t) = u_apply;
-
+    history_x(:,t) = x_robot;
+    history_u(:,t) = u_apply;
+    
 end
-
-% Truncate
-if t < T
-    final_step = t - 1;
-else
-    final_step = T;
-end
-
-history_x = history_x(:, 1:final_step);
-history_u = history_u(:, 1:final_step);
 
 %% Plotting
 
@@ -217,22 +139,22 @@ if ~isempty(pathIds)
         node_idx = pathIds(k);
         plot(nodes(node_idx).poly, 'FaceColor',[1.0 0.85 0.7], 'FaceAlpha',0.40, 'EdgeColor',[1.0 0.5 0.0], 'LineWidth',1.5);
     end
-    
+
     num_nodes = length(pathIds);
     route_points = zeros(num_nodes + 1, 2); 
     route_points(1, :) = q_start; 
-    
+
     for k = 1:(num_nodes - 1)
         curr_node = nodes(pathIds(k)).poly;
         next_node = nodes(pathIds(k+1)).poly;
-        
+
         intersection_poly = intersect(curr_node, next_node);
         [cx, cy] = centroid(intersection_poly);
         route_points(k+1, :) = [cx, cy];
     end
-    
+
     route_points(end, :) = q_goal; 
-    
+
     plot(route_points(:,1), route_points(:,2), 'bo', 'MarkerSize',6, 'LineWidth',1.5);
 end
 
@@ -241,7 +163,7 @@ plot(q_goal(1),  q_goal(2),  'ro', 'MarkerSize',9, 'LineWidth',2);
 grid on;
 
 hold on
-% plot(waypoints(:,1), waypoints(:,2), 'k--s', 'LineWidth', 1.5, 'MarkerSize', 8); hold on;
+
 plot(history_x(1,:), history_x(2,:), 'r-', 'LineWidth', 2);
 title('MPC Waypoint Tracking (Fixed)');
 legend('Waypoints', 'Robot Path');

@@ -2,7 +2,7 @@
 TODO:
 - alpha and Pc variables must be replaced by an algorithm that keeps going
 until a path is found.
-- Dijkstra doğru mu arama yapıyor?
+- Start and goal points must be reversed.
 %}
 
 %%  SNG (Sampling-Based Neighborhood Graph)
@@ -11,7 +11,7 @@ clear; clc; close all;
 rng(5); % seed
 
 % Choose scenario
-scenarioId = 1;   % 1 or 2
+scenarioId = 2;   % 1 or 2
 
 % [map edges, obstacle polygons, start point, goal point]
 [W, obs, q_start, q_goal] = getScenario(scenarioId);
@@ -98,7 +98,9 @@ A = rebuildAdjacency(nodes, P);
 
 %% ------------------ SHORTEST NODE-PATH ---------------------
 
-[pathIds, distVal] = dijkstraSparse(A, startId, goalId);
+[pathIds, distVal] = dijkstraSparse(A, goalId, startId); %% Search fromn goal to start
+
+pathIds = flip(pathIds); %% Flip the waypoints.
 
 if isempty(pathIds)
     warning('No path found in the graph (graph may be disconnected).');
