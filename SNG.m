@@ -1,29 +1,30 @@
 %{
 TODO:
-- alpha and Pc variables must be replaced by an algorithm that keeps going
-until a path is found.
-- Start and goal points must be reversed.
+- MPC is working but constraints must be handles and circular coordinates
+must be implemented.
+- Asymmetric grow
+- Cartesian sampling instead of whole map
 %}
 
-%%  SNG (Sampling-Based Neighborhood Graph)
+%%  SNG (Sampling-Based Neighborhood Graph) With Circular Funnels
 
 clear; clc; close all;
 rng(5); % seed
 
 % Choose scenario
-scenarioId = 2;   % 1 or 2
+scenarioId = 1;   % 1 or 2
 
 % [map edges, obstacle polygons, start point, goal point]
 [W, obs, q_start, q_goal] = getScenario(scenarioId);
 
 %% ------------------ SNG PARAMETERS -------------------------
-P.asymExpand = false; % true = asymmetric growth, false = symmetric growth
 
-P.overlapThreshold = 1e-6;
-P.minRectArea      = 0.001;
+P.overlapThreshold = 0.1;
+P.minCircArea      = 0.001;
 
-P.maxHalfSize   = [50.0, 50.0];
-P.safetyMargin  = 0.01;
+P.maxRadius = 10.0;
+
+P.safetyMargin  = 0.1;
 P.expandStep    = 0.05;
 
 alpha = 0.99;
@@ -34,7 +35,7 @@ m_fail = 0;                                  % consecutive failures counter
 
 %% ------------------ BUILD SNG GRAPH ------------------------
 % polyshape, centroid, index, orientation
-nodes = struct('poly', {}, 'c', {}, 'id', {}, 'theta', {});
+nodes = struct('poly', {}, 'c', {}, 'id', {}, 'radius', {});
 
 % Map border polygon
 workPoly = polyshape([W(1) W(2) W(2) W(1)],[W(3) W(3) W(4) W(4)]);
@@ -63,17 +64,17 @@ while m < m_req
     end
 
     % Build the funnel around the sampled point
-    [nodePoly, theta] = buildRectNode(q, obs, workPoly, P);
+    [nodePoly, radius] = buildCircularNode(q, obs, workPoly, P);
 
     % If created node is empty or does not meet minimum area requirement, skip without accepting
-    if isempty(nodePoly) || area(nodePoly) < P.minRectArea
+    if isempty(nodePoly) || area(nodePoly) < P.minCircArea
         continue;
     end
 
     % Accept node 
     accepted = accepted + 1;
     nodes(accepted).poly  = nodePoly;
-    nodes(accepted).theta = theta;
+    nodes(accepted).radius = radius;
     [cx, cy] = centroid(nodePoly);
     nodes(accepted).c  = [cx, cy];
     nodes(accepted).id = accepted;
@@ -193,32 +194,30 @@ function ok = isFreePoint(q, obs, workPoly)
 end
 
 function inside = isPolyInsideWorkspace(Psh, workPoly)
+    if isempty(Psh) || Psh.NumRegions == 0
+        inside = false; return;
+    end
     Pint = intersect(Psh, workPoly);
     inside = ~isempty(Pint) && abs(area(Pint) - area(Psh)) < 1e-9;
 end
 
-function poly = rectPolyAsym(c, aP, aM, bP, bM, theta)
-    corners_uv = [ +aP +bP;
-                   -aM +bP;
-                   -aM -bM;
-                   +aP -bM ];
-    R = [cos(theta) -sin(theta); sin(theta) cos(theta)];
-    corners_xy = (R * corners_uv')' + c;
-    poly = polyshape(corners_xy(:,1), corners_xy(:,2));
+
+function poly = circularPoly(center, radius)
+    numPoints = 100; % Resolution of the circle
+    theta = linspace(0, 2*pi, numPoints)';
+    x = center(1) + radius * cos(theta);
+    y = center(2) + radius * sin(theta);
+    poly = polyshape(x, y);
 end
 
-function poly = rectPolySym(c, hx, hy, theta)
-    poly = rectPolyAsym(c, hx, hx, hy, hy, theta);
-end
-
-function coll = rectCollides(rectP, obs, margin)
+function coll = circCollides(poly, obs, margin)
     coll = false;
     for i=1:numel(obs)
         ob = obs{i};
         if margin > 0
             try, ob = polybuffer(ob, margin); catch, end
         end
-        interP = intersect(rectP, ob);
+        interP = intersect(poly, ob);
         if ~isempty(interP) && area(interP) > 0
             coll = true; return;
         end
@@ -248,107 +247,40 @@ function [qobs, dmin] = closestObstaclePoint(qrand, obs)
     end
 end
 
-
-function [poly, theta] = buildRectNode(qrand, obs, workPoly, P)
-    
+function [poly, radius] = buildCircularNode(qrand, obs, workPoly, P)
     poly = [];
-    theta = 0;
-
-    % Method 1: initial square from dmin, then expand
-    [qobs, dmin] = closestObstaclePoint(qrand, obs);
-    if isempty(qobs) || ~isfinite(dmin) || dmin <= 1e-6, poly=[]; return; end
-
-    h = dmin / sqrt(2);
-    h = min(h, min(P.maxHalfSize));
-
-    v = qobs - qrand;
-    theta = atan2(v(2), v(1)) + pi/2;
-
-    if P.asymExpand
-        aP=h; aM=h; bP=h; bM=h;
-        poly = rectPolyAsym(qrand, aP,aM,bP,bM, theta);
-        if ~isPolyInsideWorkspace(poly, workPoly) || rectCollides(poly, obs, P.safetyMargin), poly=[]; return; end
-
-        % expand each side independently
-        [aP,aM,bP,bM] = expandAsymExtents(qrand, theta, aP,aM,bP,bM, obs, workPoly, P);
-        poly = rectPolyAsym(qrand, aP,aM,bP,bM, theta);
-    else
-        hx=h; hy=h;
-        poly = rectPolySym(qrand, hx, hy, theta);
-        if ~isPolyInsideWorkspace(poly, workPoly) || rectCollides(poly, obs, P.safetyMargin), poly=[]; return; end
-
-        % symmetric expand
-        [hx,hy] = expandSymHalfSizes(qrand, theta, hx,hy, obs, workPoly, P);
-        poly = rectPolySym(qrand, hx,hy, theta);
+    radius = 0;
+    [~, dmin] = closestObstaclePoint(qrand, obs);
+    
+    % Subtract safety margin immediately so the initial poly is valid
+    radius = dmin - P.safetyMargin;
+    
+    % Basic validity checks
+    if radius <= 0 || ~isfinite(radius), return; end
+    if radius > P.maxRadius, radius = P.maxRadius; end
+    
+    center = qrand;
+    poly = circularPoly(center, radius);
+    
+    % Check if initial circle is valid
+    if ~isPolyInsideWorkspace(poly, workPoly) || circCollides(poly, obs, P.safetyMargin)
+        poly = []; 
+        return; 
     end
+    
+    % Expand from the valid base
+    radius = expandNode(qrand, radius, obs, workPoly, P);
+    poly = circularPoly(qrand, radius);
 end
 
-function [aP,aM,bP,bM] = expandAsymExtents(c, theta, aP,aM,bP,bM, obs, workPoly, P)
-    % +u
-    while aP + P.expandStep <= P.maxHalfSize(1)
-        cand = rectPolyAsym(c, aP + P.expandStep, aM, bP, bM, theta);
-        if ~isPolyInsideWorkspace(cand, workPoly) || rectCollides(cand, obs, P.safetyMargin), break; end
-        aP = aP + P.expandStep;
+
+function radius = expandNode(center, radius, obs, workPoly, P)
+    while radius + P.expandStep <= P.maxRadius
+        cand = circularPoly(center, radius);
+        if ~isPolyInsideWorkspace(cand, workPoly) || circCollides(cand, obs, P.safetyMargin), break; end
+        radius = radius + P.expandStep;
     end
-    % -u
-    while aM + P.expandStep <= P.maxHalfSize(1)
-        cand = rectPolyAsym(c, aP, aM + P.expandStep, bP, bM, theta);
-        if ~isPolyInsideWorkspace(cand, workPoly) || rectCollides(cand, obs, P.safetyMargin), break; end
-        aM = aM + P.expandStep;
-    end
-    % +v
-    while bP + P.expandStep <= P.maxHalfSize(2)
-        cand = rectPolyAsym(c, aP, aM, bP + P.expandStep, bM, theta);
-        if ~isPolyInsideWorkspace(cand, workPoly) || rectCollides(cand, obs, P.safetyMargin), break; end
-        bP = bP + P.expandStep;
-    end
-    % -v
-    while bM + P.expandStep <= P.maxHalfSize(2)
-        cand = rectPolyAsym(c, aP, aM, bP, bM + P.expandStep, theta);
-        if ~isPolyInsideWorkspace(cand, workPoly) || rectCollides(cand, obs, P.safetyMargin), break; end
-        bM = bM + P.expandStep;
-    end
-end
 
-function [hx,hy] = expandSymHalfSizes(c, theta, hx,hy, obs, workPoly, P)
-    while hx + P.expandStep <= P.maxHalfSize(1)
-        cand = rectPolySym(c, hx + P.expandStep, hy, theta);
-        if ~isPolyInsideWorkspace(cand, workPoly) || rectCollides(cand, obs, P.safetyMargin), break; end
-        hx = hx + P.expandStep;
-    end
-    while hy + P.expandStep <= P.maxHalfSize(2)
-        cand = rectPolySym(c, hx, hy + P.expandStep, theta);
-        if ~isPolyInsideWorkspace(cand, workPoly) || rectCollides(cand, obs, P.safetyMargin), break; end
-        hy = hy + P.expandStep;
-    end
-end
-
-function [aP,aM,bP,bM] = rectExtentsAsym(poly, center, theta)
-    [vx, vy] = boundary(poly);
-    V = [vx(:) vy(:)];
-    if size(V,1) >= 2 && all(V(1,:) == V(end,:)), V(end,:) = []; end
-
-    V = V - center;
-    R = [cos(-theta) -sin(-theta); sin(-theta) cos(-theta)];
-    Vr = (R * V')';
-
-    aP = max(Vr(:,1));
-    aM = max(-Vr(:,1));
-    bP = max(Vr(:,2));
-    bM = max(-Vr(:,2));
-end
-
-function [hx,hy] = rectHalfSizesSym(poly, center, theta)
-    [vx, vy] = boundary(poly);
-    V = [vx(:) vy(:)];
-    if size(V,1) >= 2 && all(V(1,:) == V(end,:)), V(end,:) = []; end
-
-    V = V - center;
-    R = [cos(-theta) -sin(-theta); sin(-theta) cos(-theta)];
-    Vr = (R * V')';
-
-    hx = max(abs(Vr(:,1)));
-    hy = max(abs(Vr(:,2)));
 end
 
 function A = rebuildAdjacency(nodes, P)
@@ -365,25 +297,25 @@ function A = rebuildAdjacency(nodes, P)
     end
 end
 
-
 function nodes = addPointAsNode(nodes, q, obs, workPoly, P, tag)
-    % Create node polygon + theta depending on method
+    [poly, radius] = buildCircularNode(q, obs, workPoly, P);
     
-    [poly, theta] = buildRectNode(q, obs, workPoly, P);
-
+    % Fallback: if build failed, try a tiny circle
     if isempty(poly)
-        theta = 0;
-        poly  = rectPolyAsym(q, 0.6,0.6,0.6,0.6, theta);
-        if ~isPolyInsideWorkspace(poly, workPoly) || rectCollides(poly, obs, P.safetyMargin)
-            error('%s node could not be embedded (fallback invalid).', tag);
-        end
+        radius = P.expandStep; 
+        poly = circularPoly(q, radius);
+    end
+    
+    % Now check validity
+    if ~isPolyInsideWorkspace(poly, workPoly) % || circCollides(poly, obs, P.safetyMargin)
+         error('%s node could not be embedded. Point is likely too close to obstacle.', tag);
     end
 
-    % ---- FIX: ensure START/GOAL overlaps at least one existing node ----
+    % ensure START/GOAL overlaps at least one existing node
     if ~isempty(nodes)
         if ~hasAnyOverlap(poly, nodes, P.overlapThreshold)
             % grow uniformly a bit until it overlaps something (still collision-free)
-            [poly, ok] = growUntilOverlap(poly, q, theta, nodes, obs, workPoly, P);
+            [poly, ok] = growUntilOverlap(poly, q, radius, nodes, obs, workPoly, P);
             if ~ok
                 % last resort: lower threshold effect by forcing tiny threshold overlap
                 % (keeps code minimal; you can tune overlapThreshold instead)
@@ -396,7 +328,7 @@ function nodes = addPointAsNode(nodes, q, obs, workPoly, P, tag)
     [cx, cy]       = centroid(poly);
     nodes(n).c     = [cx, cy];
     nodes(n).id    = n;
-    nodes(n).theta = theta;
+    nodes(n).radius = radius;
 
     fprintf('Added %s node as id=%d\n', tag, n);
 end
@@ -411,41 +343,21 @@ function tf = hasAnyOverlap(poly, nodes, thr)
     end
 end
 
-function [poly, ok] = growUntilOverlap(poly, center, theta, nodes, obs, workPoly, P)
+function [poly, ok] = growUntilOverlap(poly, center, radius, nodes, obs, workPoly, P)
     ok = false;
 
-    if P.asymExpand
-        [aP,aM,bP,bM] = rectExtentsAsym(poly, center, theta);
-        for k=1:200
-            % grow all sides a bit
-            aP = aP + P.expandStep; aM = aM + P.expandStep;
-            bP = bP + P.expandStep; bM = bM + P.expandStep;
-            cand = rectPolyAsym(center, aP,aM,bP,bM, theta);
-
-            if ~isPolyInsideWorkspace(cand, workPoly) || rectCollides(cand, obs, P.safetyMargin)
-                break;
-            end
-            poly = cand;
-            if hasAnyOverlap(poly, nodes, P.overlapThreshold)
-                ok = true; return;
-            end
+    for k=1:200
+        radius = radius + P.expandStep;
+        cand = circularPoly(center, radius);
+        if ~isPolyInsideWorkspace(cand, workPoly) || circCollides(cand, obs, P.safetyMargin)
+            break;
         end
-    else
-        [hx,hy] = rectHalfSizesSym(poly, center, theta);
-        for k=1:200
-            hx = hx + P.expandStep;
-            hy = hy + P.expandStep;
-            cand = rectPolySym(center, hx, hy, theta);
-
-            if ~isPolyInsideWorkspace(cand, workPoly) || rectCollides(cand, obs, P.safetyMargin)
-                break;
-            end
-            poly = cand;
-            if hasAnyOverlap(poly, nodes, P.overlapThreshold)
-                ok = true; return;
-            end
+        poly = cand;
+        if hasAnyOverlap(poly, nodes, P.overlapThreshold)
+            ok = true; return;
         end
     end
+
 end
 
 function [path, distVal] = dijkstraSparse(A, s, t)
