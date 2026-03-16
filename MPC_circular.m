@@ -57,10 +57,11 @@ t_waypoints = [0, cumsum(segment_distances) / sum(segment_distances) * total_tim
 
 % Generate continuous time vector for the simulation
 t_sim = (0:T-1) * dt_sim;
+t_eval = min(t_sim, t_waypoints(end));
 
 % Fit a polynomial spline
-x_spline = spline(t_waypoints, waypoints(:,1), t_sim);
-y_spline = spline(t_waypoints, waypoints(:,2), t_sim);
+x_spline = spline(t_waypoints, waypoints(:,1), t_eval);
+y_spline = spline(t_waypoints, waypoints(:,2), t_eval);
 
 % Calculate derivatives to get reference velocities and headings
 dx_dt = gradient(x_spline) / dt_sim;
@@ -252,6 +253,8 @@ grid on;
 hold on
 
 plot(history_x(1,:), history_x(2,:), 'r-', 'LineWidth', 2);
+hold on;
+plot(x_spline, y_spline, 'k--', 'LineWidth', 1.5); % Add the spline plot
 title('MPC Waypoint Tracking (Fixed)');
 legend('Waypoints', 'Robot Path');
 grid on; axis equal;
