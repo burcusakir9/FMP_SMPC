@@ -45,29 +45,6 @@ history_x = zeros(3, T); % Cartesian history for plotting
 history_u = zeros(nu, T);
 
 options = optimoptions('quadprog', 'Display', 'off');
-%% Trajectory Generation
-
-% Calculate distances between SNG waypoints to estimate time allocation
-segment_distances = vecnorm(diff(waypoints)', 1);
-total_distance = sum(segment_distances);
-total_time = total_distance / (v_max * 0.7); % leave margin for acceleration
-
-% Generate time vector for the waypoints
-t_waypoints = [0, cumsum(segment_distances) / sum(segment_distances) * total_time];
-
-% Generate continuous time vector for the simulation
-t_sim = (0:T-1) * dt_sim;
-t_eval = min(t_sim, t_waypoints(end));
-
-% Fit a polynomial spline
-x_spline = spline(t_waypoints, waypoints(:,1), t_eval);
-y_spline = spline(t_waypoints, waypoints(:,2), t_eval);
-
-% Calculate derivatives to get reference velocities and headings
-dx_dt = gradient(x_spline) / dt_sim;
-dy_dt = gradient(y_spline) / dt_sim;
-v_ref_traj = sqrt(dx_dt.^2 + dy_dt.^2);
-u_apply = [0; 0];
 
 %% Simulation Loop
 
@@ -75,22 +52,35 @@ fprintf('Starting MPC Simulation in Polar Coordinates...\n');
 
 for t = 1:T
     if mod(t-1, mpc_interval) == 0
-    
+
+        % Waypoint Logic
+        target = waypoints(target_idx, :)';
+        if norm(x_robot(1:2) - target) < wp_tol && target_idx < size(waypoints, 1)
+            target_idx = target_idx + 1;
+            target = waypoints(target_idx, :)';
+        end
+        
         % Cartesian to Polar Conversion
-        xr = x_spline(t);
-        yr = y_spline(t);
-    
-        v_ref = max(v_ref_traj(t), 0.1);
+        xr = target(1); 
+        yr = target(2);
         dx = xr - x_robot(1);
         dy = yr - x_robot(2);
         
         r_state = sqrt(dx^2 + dy^2);
         alpha = atan2(dy, dx);
         phi_state = alpha - x_robot(3);
-        phi_state = atan2(sin(phi_state), cos(phi_state));
+        phi_state = atan2(sin(phi_state), cos(phi_state)); % Wrap angle to [-pi, pi]
         
         x_polar = [r_state; phi_state];
         
+        % Reference velocity for linearization
+        if t == 1
+            v_ref = 0.1;
+        else
+            v_ref = max(history_u(1, t-1), 0.1); % Use previous velocity, minimum 0.1
+        end
+
+        % Jacobian Linearization (Ac and Bc)
         r_safe = max(r_state, 0.05); % Prevent division by zero
         
         Ac = [0,  v_ref * sin(phi_state);
@@ -98,7 +88,7 @@ for t = 1:T
              
         Bc = [-cos(phi_state), 0;
                sin(phi_state) / r_safe, -1];
-        
+
         % Euler Discretization
         A = eye(2) + Ac * dt_mpc;
         B = Bc * dt_mpc;
@@ -220,6 +210,7 @@ function idx = find_node_for_point(pt, nodes)
     
 end
 %% Plotting
+
 figure('WindowState','maximized', 'Color','w'); hold on; axis equal;
 xlim([W(1) W(2)]); ylim([W(3) W(4)]);
 title('Figür 2: Dijkstra - Seçilen Yol ve Kesişim Waypointleri');
@@ -233,32 +224,38 @@ if ~isempty(pathIds)
         node_idx = pathIds(k);
         plot(nodes(node_idx).poly, 'FaceColor',[1.0 0.85 0.7], 'FaceAlpha',0.40, 'EdgeColor',[1.0 0.5 0.0], 'LineWidth',1.5);
     end
+
     num_nodes = length(pathIds);
     route_points = zeros(num_nodes + 1, 2); 
     route_points(1, :) = q_start; 
+
     for k = 1:(num_nodes - 1)
         curr_node = nodes(pathIds(k)).poly;
         next_node = nodes(pathIds(k+1)).poly;
+
         intersection_poly = intersect(curr_node, next_node);
         [cx, cy] = centroid(intersection_poly);
         route_points(k+1, :) = [cx, cy];
     end
+
     route_points(end, :) = q_goal; 
+
     plot(route_points(:,1), route_points(:,2), 'bo', 'MarkerSize',6, 'LineWidth',1.5);
 end
 
 plot(q_start(1), q_start(2), 'go', 'MarkerSize',9, 'LineWidth',2);
 plot(q_goal(1),  q_goal(2),  'ro', 'MarkerSize',9, 'LineWidth',2);
 grid on;
+
 hold on
 
 plot(history_x(1,:), history_x(2,:), 'r-', 'LineWidth', 2);
-hold on;
-plot(x_spline, y_spline, 'k--', 'LineWidth', 1.5); % Add the spline plot
-title('MPC Waypoint Tracking (Fixed)');
+title('MPC Waypoint Tracking');
 legend('Waypoints', 'Robot Path');
 grid on; axis equal;
 xlabel('X [m]'); ylabel('Y [m]');
+
+
 t = (0:size(history_u,2)-1) * dt_sim;
 
 figure('Color','w');
@@ -267,6 +264,7 @@ plot(t, history_u(1,:), 'b', 'LineWidth',1.5);
 grid on;
 ylabel('u');
 title('Control inputs');
+
 subplot(2,1,2);
 plot(t, history_u(2,:), 'r', 'LineWidth',1.5);
 grid on;
