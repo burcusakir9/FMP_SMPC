@@ -8,11 +8,11 @@ must be implemented.
 
 %%  SNG (Sampling-Based Neighborhood Graph) With Circular Funnels
 
-clear; clc; close all;
-rng(5); % seed
+close all;
+% rng(5); % seed
 
 % Choose scenario
-scenarioId = 1;   % 1 or 2
+scenarioId = 4;   % 1 or 2
 
 % [map edges, obstacle polygons, start point, goal point]
 [W, obs, q_start, q_goal] = getScenario(scenarioId);
@@ -20,14 +20,14 @@ scenarioId = 1;   % 1 or 2
 %% ------------------ SNG PARAMETERS -------------------------
 
 P.overlapThreshold = 0.1;
-P.minCircArea      = 0.001;
+P.minCircArea      = 3.0;
 
-P.maxRadius = 10.0;
+P.maxRadius = inf;
 
-P.safetyMargin  = 0.1;
-P.expandStep    = 0.05;
+P.safetyMargin  = 2.0;
+P.expandStep    = 0.1;
 
-alpha = 0.99;
+alpha = 0.97;
 Pc    = 0.95;
 
 m_req = ceil(log(1-Pc)/log(alpha) - 1);
