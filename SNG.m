@@ -9,7 +9,7 @@ must be implemented.
 %%  SNG (Sampling-Based Neighborhood Graph) With Circular Funnels
 
 close all;
-% rng(5); % seed
+rng(5); % seed
 
 % Choose scenario
 scenarioId = 4;   % 1 or 2

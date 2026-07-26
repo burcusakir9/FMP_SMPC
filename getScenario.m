@@ -35,6 +35,7 @@ switch scn
 
         q_start = [2.5 5]; 
         q_goal  = [15 5];
+        
     case 3
 
         W = [0 500 0 500];
