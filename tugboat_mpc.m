@@ -2,7 +2,7 @@
 
 dt_sim = 0.01;          % Simulation sample time
 dt_mpc = 0.05;          % MPC sample time
-N = 15;                 % MPC horizon
+N = 10;                 % MPC horizon
 sim_time = 200;         % seconds
 T = round(sim_time / dt_sim);
 mpc_interval = round(dt_mpc / dt_sim);
