@@ -1,4 +1,4 @@
-function [xdot, U, M, B_prop] = tugboat3d(x, u)
+function xdot = tugboat3d(x, u)
 %TUGBOAT3D  3-DOF tugboat model with first-order actuator dynamics
 %
 % State:

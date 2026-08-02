@@ -7,23 +7,19 @@ sim_time = 200;         % seconds
 T = round(sim_time / dt_sim);
 mpc_interval = round(dt_mpc / dt_sim);
 
-nx = 6;                 % [x, y, yaw, u, v, r]
-nu = 2;                 % [n1, n2]
+nx = 8;                 % [X; Y; psi; ub; vb; r; F_L; F_R]
+nu = 2;                 % [F_L_cmd; F_R_cmd]
 
-% Propeller limits
-n_max = 100;
-n_min = -100;
-
-% Propeller slew-rate limits (per MPC step)
-dn_max = 100;
-du_max = [dn_max; dn_max];
+% Input limits
+u_max = 100;
+u_min = -100;
 
 % Waypoint / stopping tolerances
 wp_tol = 5.0;
 goal_point_tol = 2.0;
 
 % MPC weights
-Q = diag([10, 10, 200, 5, 5, 50]);
+Q = diag([10, 10, 200, 5, 5, 50, 0, 0]);
 R = diag([0.5, 0.5]);
 
 %% Waypoints extraction from pathIds
@@ -50,7 +46,7 @@ end
 waypoints(end, :) = q_goal;
 
 %% Initialization
-x_robot = [q_start(1); q_start(2); 0; 0; 0; 0];
+x_robot = [q_start(1); q_start(2); 0; 0; 0; 0; 0; 0];
 
 if size(waypoints,1) >= 2
     target_idx = 2;     % start tracking first real waypoint after q_start
@@ -99,6 +95,8 @@ for t = 1:T
         x_ref = [target(1);
                  target(2);
                  yaw_ref;
+                 0;
+                 0;
                  0;
                  0;
                  0];
@@ -152,19 +150,10 @@ for t = 1:T
         H = (H + H') / 2;
         f = 2 * (Gamma' * Q_b * E);
 
-        %% Rate constraints on delta-U sequence
-        D = kron(eye(N), eye(nu)) - kron(diag(ones(N-1,1), -1), eye(nu));
-
-        A_rate = [ D;
-                  -D];
-
-        b_rate = [repmat(du_max, N, 1);
-                  repmat(du_max, N, 1)];
-
         %% Absolute input bounds converted to deviation bounds
-        % n_min <= u_lin + du_k <= n_max
-        lb = repmat([n_min; n_min] - u_lin, N, 1);
-        ub = repmat([n_max; n_max] - u_lin, N, 1);
+        % u_min <= u_lin + du_k <= n_max
+        lb = repmat([u_min; u_min] - u_lin, N, 1);
+        ub = repmat([u_max; u_max] - u_lin, N, 1);
 
         %% Active circular funnel
         %
@@ -203,7 +192,7 @@ for t = 1:T
             DU, Phi, Gamma, x_lin, delta_x0, funnel_center, funnel_radius, nx, N);
 
         %% Solve NLP
-        [DU_opt, ~, exitflag] = fmincon(objfun, DU0, A_rate, b_rate, ...
+        [DU_opt, ~, exitflag] = fmincon(objfun, DU0, [], [], ...
             [], [], lb, ub, nonlcon, nlp_options);
 
         %% Apply input safely
@@ -219,7 +208,7 @@ for t = 1:T
     end
 
     %% Plant update
-    [xdot, ~] = tugboat3d(x_robot, u_apply);
+    xdot = tugboat3d(x_robot, u_apply);
     x_robot = x_robot + dt_sim * xdot;
     x_robot(3) = atan2(sin(x_robot(3)), cos(x_robot(3)));
 
@@ -260,7 +249,7 @@ if ~isempty(pathIds)
         plot(nodes(node_idx).poly, 'FaceColor',[1.0 0.85 0.7], 'FaceAlpha',0.40, ...
             'EdgeColor',[1.0 0.5 0.0], 'LineWidth',1.5);
     end
-    plot(waypoints(:,1), waypoints(:,2), 'bo', 'MarkerSize',6, 'LineWidth',1.5);
+plot(waypoints(:,1), waypoints(:,2), 'bo--', 'MarkerSize',6, 'LineWidth',1.5);
 end
 
 plot(history_x(1,:), history_x(2,:), 'r-', 'LineWidth', 2);
@@ -276,15 +265,15 @@ fig2 = figure('Units','centimeters', 'Position',[2, 2, figWidth, figHeight], 'Co
 tlo2 = tiledlayout(2,1,'Padding','tight','TileSpacing','compact'); 
 
 nexttile;
-plot(t_vec, history_u(1,:), 'b', 'LineWidth',1.5);
+plot(t_vec, history_u(1,:), 'r', 'LineWidth',1.5);
 grid on; set(gca, 'XTickLabel', [], 'Box', 'on');
-ylabel('F_{left} (N)'); 
+ylabel('F_{left_cmd} (N)'); 
 
 nexttile;
 plot(t_vec, history_u(2,:), 'r', 'LineWidth',1.5);
 grid on; set(gca, 'Box', 'on');
 xlabel('Time [s]');
-ylabel('F_{right} (N)');
+ylabel('F_{right_cmd} (N)'); 
 
 % --- Durum Değişkenleri Grafiği ---
 fig3 = figure('Units','centimeters', 'Position',[figWidth+3, 2, figWidth, figHeight], 'Color','w');
