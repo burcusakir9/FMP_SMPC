@@ -1,15 +1,8 @@
 %% DURMAZ, OZDEMIR & ANKARALI (2024) CONTROLLER + SIMULATION
-% "Feedback motion planning via sequential composition of random
-%  elliptical funnels" -- circular-funnel special case (a = 1), Eq. (33).
-%
-% Reduces to the Ege & Ankarali (2019) policy plus one extra
-% feedback-linearizing term on omega, (v/rho)*sin(alpha), which is what
-% the paper's Proposition 1 uses to guarantee rho is non-increasing
-% (i.e. the vehicle provably never leaves the active funnel).
 
 %% CONTROLLER PARAMETERS
 
-Kv       = 0.10;
+Kv       = 0.05;
 Ka       = 0.30;
 theta0   = 0.0;      % initial heading [rad]
 
