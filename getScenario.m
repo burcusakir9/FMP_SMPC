@@ -128,6 +128,14 @@ switch scn
         q_start = [50 350];  % Center-bottom in the 100-unit padding
         q_goal  = [350 350]; % Inside the upper mapped area
 
+   case 5
+       
+        W = [0 100 0 100];
+        obs = {};
+        obs{end+1} = polyshape([20 80 20 80], [20 20 80 80]);
+        q_start = [40 50]; 
+        q_goal  = [60 50];
+
 
     otherwise
         error('Unknown scenario id: %d', scn);
