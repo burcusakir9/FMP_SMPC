@@ -6,7 +6,8 @@ function out = simulateRun(chain, cfg, run)
 % run fields (defaults in brackets):
 %   law     'durmaz' | 'ms' | 'msR'      speed law (see thesisConfig.m)
 %   U_m     mission speed [m/s]          (ignored by 'durmaz')
-%   filter  ['none'] | 'cbf' | 'hocbf'   safety filter
+%   filter  ['none'] | 'cbf' | 'hocbf'   safety filter; 'rcbf' | 'rhocbf':
+%           robust versions for a current up to cfg.Vb
 %   plant   ['dynamic'] | 'unicycle'     vessel model or ideal kinematic unicycle
 %   dist    struct of disturbances, all unknown to controller and filters:
 %             Vc [0;0]        constant current [m/s], world frame
@@ -61,6 +62,10 @@ function out = simulateRun(chain, cfg, run)
 
     KF = cfg.KF; KF.u_lim = max(1, run.U_m*~strcmp(run.law, 'durmaz')); KF.qp = cfg.qp;
     HF = cfg.HF; HF.qp = cfg.qp;
+    robust = any(strcmp(run.filter, {'rcbf', 'rhocbf'}));
+    KF.Vb = robust*cfg.Vb; HF.Vb = robust*cfg.Vb;
+    useKF = any(strcmp(run.filter, {'cbf', 'rcbf'}));
+    useHF = any(strcmp(run.filter, {'hocbf', 'rhocbf'}));
     PI = cfg.PI;
     Flim = [vs.Fmin, vs.Fmax];
 
@@ -123,7 +128,7 @@ function out = simulateRun(chain, cfg, run)
         if strcmp(run.law, 'durmaz')
             s = 2*cfg.Kv*rho;
         elseif isGoal
-            s = U*tanh(2*cfg.Kv*rho/U);
+            s = max(U*tanh(2*cfg.Kv*rho/U), min(U, cfg.U_goalMin));
         else
             s = U;
         end
@@ -136,7 +141,7 @@ function out = simulateRun(chain, cfg, run)
         u_ref = un; w_ref = wn; changed = false;
 
         % 4. Kinematic CBF/HOCBF filter on the references
-        if strcmp(run.filter, 'cbf') && rho > cfg.rho_tol
+        if useKF && rho > cfg.rho_tol
             [u_ref, w_ref, infeas] = kinFilter(xm, un, wn, ctr, Rk, KF);
             changed = abs(u_ref - un) > 1e-4 || abs(w_ref - wn) > 1e-4;
             nInfeas = nInfeas + infeas; nCtrl = nCtrl + 1;
@@ -158,7 +163,7 @@ function out = simulateRun(chain, cfg, run)
             if F(1) == FLc && F(2) == FRc, int_u = iu; int_r = ir; end
 
             % 6. Dynamic HOCBF filter on the thrust
-            if strcmp(run.filter, 'hocbf') && rho > cfg.rho_tol
+            if useHF && rho > cfg.rho_tol
                 Fn = F;
                 [F, infeas] = hocbfFilter(xm, Fn, ctr, Rk, HF, Flim, model, vs);
                 changed = norm(F - Fn) > 1e-3;
@@ -213,7 +218,8 @@ function [u_ref, w_ref, infeas] = kinFilter(x, u_nom, w_nom, ctr, R, KF)
     Lf2b = -wt^2/rho; LgLfb = [0, -wt];
 
     A = [-Lgb; -LgLfb];
-    c = [Lfb + KF.k1*b; Lf2b + (KF.k1 + KF.k2)*bdot + KF.k1*KF.k2*b];
+    % Robust (KF.Vb > 0): b_dot is replaced by its worst case b_dot - Vb
+    c = [Lfb - KF.Vb + KF.k1*b; Lf2b + (KF.k1 + KF.k2)*(bdot - KF.Vb) + KF.k1*KF.k2*b];
     lb = [-KF.u_lim; -KF.w_lim]; ub = [KF.u_lim; KF.w_lim];
     nu_nom = [u_nom; w_nom];
 
@@ -249,7 +255,7 @@ function [F, infeas] = hocbfFilter(x, F_nom, ctr, R, HF, Flim, model, vs)
     LgLfb = cos(alpha)*G(1,:) + sin(alpha)*G(2,:);
 
     A = -LgLfb;
-    c = Lf2b + (HF.k1 + HF.k2)*Lfb + HF.k1*HF.k2*b;
+    c = Lf2b + (HF.k1 + HF.k2)*(Lfb - HF.Vb) + HF.k1*HF.k2*b;   % robust if HF.Vb > 0
     infeas = sum(min(A*Flim(1), A*Flim(2))) > c;
     F = F_nom;
     if A*F_nom <= c, return; end

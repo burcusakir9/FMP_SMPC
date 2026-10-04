@@ -4,7 +4,7 @@ close all;
 rng(69); % seed
 
 % Choose  and get scenario
-scenarioId = 3;   % 1 or 2
+scenarioId = 4;   % 1 or 2
 [W, obs, q_start, q_goal] = getScenario(scenarioId);
 
 %% RSC PARAMETERS

@@ -122,16 +122,19 @@ function coll = circCollides(poly, obs, margin)
 end
 
 function dmin = closestObstacleDistance(q, obs)
+% Exact distance from q to the obstacle boundaries (RSC.m sampled 400 points
+% per edge, which overestimates the distance slightly and can make a
+% tangent circle intersect the buffered obstacle).
     dmin = inf;
     for i = 1:numel(obs)
         [vx, vy] = boundary(obs{i});
         if isempty(vx), continue; end
-        V = [vx(:) vy(:)];
-        a = linspace(0, 1, 400)';
-        for k = 1:size(V,1)-1
-            pts = (1-a).*V(k,:) + a.*V(k+1,:);
-            dmin = min(dmin, sqrt(min(sum((pts - q).^2, 2))));
-        end
+        A = [vx(1:end-1) vy(1:end-1)]; B = [vx(2:end) vy(2:end)];
+        ok = all(isfinite(A), 2) & all(isfinite(B), 2);   % skip NaN region separators
+        A = A(ok,:); B = B(ok,:);
+        AB = B - A; L2 = max(sum(AB.^2, 2), 1e-12);
+        t = min(max(sum((q - A).*AB, 2)./L2, 0), 1);
+        dmin = min(dmin, sqrt(min(sum((A + t.*AB - q).^2, 2))));
     end
 end
 
@@ -141,7 +144,8 @@ end
 
 function [poly, radius] = buildCircularNode(q, obs, W, workPoly, P)
     poly = []; radius = 0;
-    r = min([closestObstacleDistance(q, obs), distanceToBoxBoundary(q, W), P.maxRadius]) - P.safetyMargin;
+    % 1 cm tolerance: the circle and the buffered obstacles are polygons
+    r = min([closestObstacleDistance(q, obs), distanceToBoxBoundary(q, W), P.maxRadius]) - P.safetyMargin - 0.01;
     if r <= 0 || ~isfinite(r), return; end
     c = circularPoly(q, r);
     if ~isPolyInsideWorkspace(c, workPoly) || circCollides(c, obs, P.safetyMargin), return; end

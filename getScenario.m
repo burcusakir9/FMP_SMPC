@@ -128,8 +128,26 @@ switch scn
         q_start = [50 350];  % Center-bottom in the 100-unit padding
         q_goal  = [350 350]; % Inside the upper mapped area
 
+   case 6 % Tug-scale harbour (120 x 80 m) for the 0.9 m tug model
+        % Open approach in the south, a staggered breakwater with a narrow
+        % dog-leg entrance, a basin with three piers and two moored hulls,
+        % and the goal berth in the eastern slip.
+        W = [0 120 0 80];
+        obs = {};
+        obs{end+1} = polyshape([0 55 55 0],      [30 30 33 33]);   % west breakwater
+        obs{end+1} = polyshape([64 120 120 64],  [38 38 41 41]);   % east breakwater (staggered)
+        obs{end+1} = polyshape([28 32 32 28],    [13 13 17 17]);   % rock
+        obs{end+1} = polyshape([82 88 88 82],    [15 15 20 20]);   % rock
+        obs{end+1} = polyshape([30 33 33 30],    [52 52 80 80]);   % pier 1
+        obs{end+1} = polyshape([33.5 37.5 37.5 33.5], [60 60 76 76]);   % moored hull at pier 1
+        obs{end+1} = polyshape([62 65 65 62],    [55 55 80 80]);   % pier 2
+        obs{end+1} = polyshape([65.5 69.5 69.5 65.5], [64 64 78 78]);   % moored hull at pier 2
+        obs{end+1} = polyshape([94 97 97 94],    [50 50 80 80]);   % pier 3
+        q_start = [10 10];
+        q_goal  = [108 68];
+
    case 5
-       
+
         W = [0 100 0 100];
         obs = {};
         obs{end+1} = polyshape([20 80 20 80], [20 20 80 80]);

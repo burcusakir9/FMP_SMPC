@@ -1,0 +1,29 @@
+level,filter,better,same,worse
+nominal,CBF,0,2,0
+current 0.15 m/s,CBF,0,16,0
+current 0.30 m/s,CBF,4,12,0
+INS low,CBF,0,10,0
+INS high,CBF,0,10,0
+actuator left 60%,CBF,0,2,0
+actuator right 60%,CBF,0,2,0
+nominal,HOCBF,0,2,0
+current 0.15 m/s,HOCBF,0,16,0
+current 0.30 m/s,HOCBF,4,12,0
+INS low,HOCBF,0,10,0
+INS high,HOCBF,0,10,0
+actuator left 60%,HOCBF,0,2,0
+actuator right 60%,HOCBF,0,2,0
+nominal,rCBF,0,2,0
+current 0.15 m/s,rCBF,0,16,0
+current 0.30 m/s,rCBF,4,12,0
+INS low,rCBF,0,10,0
+INS high,rCBF,0,10,0
+actuator left 60%,rCBF,0,2,0
+actuator right 60%,rCBF,0,2,0
+nominal,rHOCBF,0,2,0
+current 0.15 m/s,rHOCBF,0,16,0
+current 0.30 m/s,rHOCBF,4,10,2
+INS low,rHOCBF,0,10,0
+INS high,rHOCBF,0,10,0
+actuator left 60%,rHOCBF,0,2,0
+actuator right 60%,rHOCBF,0,2,0
